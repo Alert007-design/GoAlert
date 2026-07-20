@@ -20,9 +20,48 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // TODO: Gem e-mailen et rigtigt sted, f.eks. Resend, Airtable eller en
-  // database, i stedet for kun at logge den. Se README for forslag.
-  console.log("Ny tilmelding til Gossip Alert:", email);
+  const token = process.env.AIRTABLE_TOKEN;
+  const baseId = process.env.AIRTABLE_BASE_ID;
+  const tableName = process.env.AIRTABLE_TABLE_NAME || "Signups";
+
+  if (!token || !baseId) {
+    console.error("Airtable er ikke konfigureret (mangler env-variabler).");
+    return NextResponse.json(
+      { error: "Der opstod en fejl. Prøv igen senere." },
+      { status: 500 }
+    );
+  }
+
+  try {
+    const airtableRes = await fetch(
+      `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fields: { Email: email },
+        }),
+      }
+    );
+
+    if (!airtableRes.ok) {
+      const errText = await airtableRes.text();
+      console.error("Airtable-fejl:", airtableRes.status, errText);
+      return NextResponse.json(
+        { error: "Der opstod en fejl. Prøv igen senere." },
+        { status: 502 }
+      );
+    }
+  } catch (err) {
+    console.error("Kunne ikke kontakte Airtable:", err);
+    return NextResponse.json(
+      { error: "Der opstod en fejl. Prøv igen senere." },
+      { status: 502 }
+    );
+  }
 
   return NextResponse.json({ ok: true });
 }
