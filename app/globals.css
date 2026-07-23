@@ -239,6 +239,26 @@ input:focus-visible {
   max-width: 440px;
 }
 
+.signupUpgrade {
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--paper);
+  border: 1px solid rgba(242, 169, 59, 0.35);
+  background: rgba(242, 169, 59, 0.08);
+  border-radius: 3px;
+  padding: 20px 22px;
+  max-width: 440px;
+}
+
+.signupUpgradeTitle {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1.15rem;
+  color: var(--amber);
+  margin: 0 0 10px;
+}
+
 /* ---------- monitoring panel ---------- */
 
 .heroPanel {
