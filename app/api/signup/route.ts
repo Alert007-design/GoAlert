@@ -68,6 +68,31 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+
+  // 0. Tjek om e-mailen allerede er kunde — gratis tilmelding er kun for nye kunder.
+  try {
+    const searchUrl = `https://api.airtable.com/v0/${baseId}/Customers?filterByFormula=${encodeURIComponent(
+      `{Email}='${email.replace(/'/g, "\\'")}'`
+    )}`;
+    const searchRes = await fetch(searchUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const searchData = await searchRes.json();
+    if (searchData.records?.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "UPGRADE_REQUIRED",
+          message:
+            "Du er allerede tilmeldt. Yderligere søgeord er kun for betalende kunder — vælg antal søgeord nedenfor for at opgradere dit abonnement.",
+        },
+        { status: 409 }
+      );
+    }
+  } catch (err) {
+    console.error("Kunne ikke tjekke eksisterende kunde:", err);
+  }
+
   // 1. Log tilmeldingen i Signups (som hidtil, til statistik/historik).
   try {
     const signupRes = await fetch(
