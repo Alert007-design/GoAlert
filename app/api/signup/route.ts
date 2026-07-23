@@ -1,5 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+async function sendEmail(to: string, subject: string, html: string) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM;
+  if (!apiKey || !from) {
+    console.error("Resend er ikke konfigureret (mangler env-variabler).");
+    return;
+  }
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ from, to, subject, html }),
+    });
+    if (!res.ok) {
+      console.error("Resend-fejl (signup-mail):", res.status, await res.text());
+    }
+  } catch (err) {
+    console.error("Kunne ikke sende e-mail fra signup:", err);
+  }
+}
+
+function welcomeEmailHtml() {
+  return `
+    <div style="font-family: sans-serif; line-height: 1.6; color: #111;">
+      <h2>Velkommen til Gossip Alert!</h2>
+      <p>Hej,</p>
+      <p>Tak fordi du er blevet kunde hos Gossip Alert. Vi glæder os til samarbejdet og håber, du bliver glad for din daglige overvågning.</p>
+      <p>Fra nu af holder vi øje med nettet for dig, og du hører fra os, så snart der sker noget relevant.</p>
+      <p>Mange hilsner,<br>Gossip Alert-teamet</p>
+    </div>
+  `;
+}
+
 export async function POST(req: NextRequest) {
   let body: { email?: string; keywords?: string[] };
   try {
@@ -85,5 +122,9 @@ export async function POST(req: NextRequest) {
       { status: 502 }
     );
   }
+
+  // 3. Send velkomstmail.
+  await sendEmail(email, "Velkommen til Gossip Alert", welcomeEmailHtml());
+
   return NextResponse.json({ ok: true });
 }
