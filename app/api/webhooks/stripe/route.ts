@@ -4,6 +4,20 @@ import Stripe from "stripe";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET as string;
 
+async function findCustomerRecord(
+  baseId: string,
+  token: string,
+  field: "Email" | "StripeSubscriptionId" | "StripeCustomerId",
+  value: string
+) {
+  const url = `https://api.airtable.com/v0/${baseId}/Customers?filterByFormula=${encodeURIComponent(
+    `{${field}}='${value.replace(/'/g, "\\'")}'`
+  )}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const data = await res.json();
+  return data.records?.[0];
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.text();
   const signature = req.headers.get("stripe-signature");
@@ -20,6 +34,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Ugyldig signatur." }, { status: 400 });
   }
 
+  const token = process.env.AIRTABLE_TOKEN;
+  const baseId = process.env.AIRTABLE_BASE_ID;
+
+  if (!token || !baseId) {
+    console.error("Airtable er ikke konfigureret (mangler env-variabler).");
+    return NextResponse.json({ received: true });
+  }
+
+  // --- Gennemført betaling: opret/opdater kunden med søgeord og aktiv status ---
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
@@ -38,24 +61,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ received: true });
     }
 
-    const token = process.env.AIRTABLE_TOKEN;
-    const baseId = process.env.AIRTABLE_BASE_ID;
-
-    if (!token || !baseId) {
-      console.error("Airtable er ikke konfigureret (mangler env-variabler).");
-      return NextResponse.json({ received: true });
-    }
-
     try {
-      // 1. Find en eksisterende kunde med samme e-mail.
-      const searchUrl = `https://api.airtable.com/v0/${baseId}/Customers?filterByFormula=${encodeURIComponent(
-        `{Email}='${email.replace(/'/g, "\\'")}'`
-      )}`;
-      const searchRes = await fetch(searchUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const searchData = await searchRes.json();
-      const existing = searchData.records?.[0];
+      const existing = await findCustomerRecord(baseId, token, "Email", email);
 
       const fields = {
         Email: email,
@@ -66,7 +73,6 @@ export async function POST(req: NextRequest) {
       };
 
       if (existing) {
-        // 2a. Kunden findes allerede (fx fra det gratis søgeord) — opdater den.
         const updateRes = await fetch(
           `https://api.airtable.com/v0/${baseId}/Customers/${existing.id}`,
           {
@@ -86,7 +92,6 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
-        // 2b. Ny kunde — opret den.
         const createRes = await fetch(`https://api.airtable.com/v0/${baseId}/Customers`, {
           method: "POST",
           headers: {
@@ -104,7 +109,58 @@ export async function POST(req: NextRequest) {
         }
       }
     } catch (err) {
-      console.error("Kunne ikke opdatere Airtable fra webhook:", err);
+      console.error("Kunne ikke opdatere Airtable fra webhook (checkout):", err);
+    }
+  }
+
+  // --- Abonnement opsagt/afsluttet: sæt kunden til inaktiv ---
+  if (event.type === "customer.subscription.deleted") {
+    const subscription = event.data.object as Stripe.Subscription;
+    const stripeSubscriptionId = subscription.id;
+    const stripeCustomerId =
+      typeof subscription.customer === "string"
+        ? subscription.customer
+        : subscription.customer?.id || "";
+
+    try {
+      let existing = await findCustomerRecord(
+        baseId,
+        token,
+        "StripeSubscriptionId",
+        stripeSubscriptionId
+      );
+
+      if (!existing && stripeCustomerId) {
+        existing = await findCustomerRecord(baseId, token, "StripeCustomerId", stripeCustomerId);
+      }
+
+      if (existing) {
+        const updateRes = await fetch(
+          `https://api.airtable.com/v0/${baseId}/Customers/${existing.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ fields: { Active: false } }),
+          }
+        );
+        if (!updateRes.ok) {
+          console.error(
+            "Airtable-fejl (opsigelse):",
+            updateRes.status,
+            await updateRes.text()
+          );
+        }
+      } else {
+        console.error(
+          "Webhook: kunne ikke finde kunde til opsigelse",
+          stripeSubscriptionId
+        );
+      }
+    } catch (err) {
+      console.error("Kunne ikke opdatere Airtable fra webhook (opsigelse):", err);
     }
   }
 
