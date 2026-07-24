@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-// Midlertidig diagnose-route: viser de RÅ resultater fra Google News (før
-// det danske kildefilter), så vi kan se om søgningen reelt finder noget,
-// og hvilke kilder der i givet fald bliver filtreret væk.
+// Midlertidig diagnose-route: tester om en Accept-Language-header får Google
+// News til at respektere dansk sprog/land, i stedet for at geo-gætte ud fra
+// serverens IP-adresse (som gav norske resultater).
 //
 // Slet denne fil igen, når fejlen er fundet og løst.
-const QUERIES = ["kendis", "fodbold Superligaen"];
+const QUERY = "kendis";
 
 function decodeEntities(text: string): string {
   return text
@@ -19,39 +19,35 @@ function decodeEntities(text: string): string {
     .trim();
 }
 
-export async function GET() {
-  const results: Record<string, any> = {};
-
-  for (const q of QUERIES) {
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-      q
-    )}&hl=da&gl=DK&ceid=DK:da`;
-
-    try {
-      const res = await fetch(url);
-      const xml = res.ok ? await res.text() : "";
-      const itemBlocks = xml.split("<item>").slice(1);
-      const rawSources: string[] = [];
-      const rawTitles: string[] = [];
-      for (const block of itemBlocks.slice(0, 10)) {
-        const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
-        const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
-        if (titleMatch) rawTitles.push(decodeEntities(titleMatch[1]));
-        rawSources.push(sourceMatch ? decodeEntities(sourceMatch[1]) : "(intet source-tag)");
-      }
-      results[q] = {
-        status: res.status,
-        ok: res.ok,
-        xmlLength: xml.length,
-        rawItemCount: itemBlocks.length,
-        rawSources,
-        rawTitles,
-        xmlPreview: xml.slice(0, 300),
-      };
-    } catch (err) {
-      results[q] = { error: String(err) };
-    }
+async function testVariant(label: string, headers: Record<string, string>) {
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
+    QUERY
+  )}&hl=da&gl=DK&ceid=DK:da`;
+  try {
+    const res = await fetch(url, { headers });
+    const xml = res.ok ? await res.text() : "";
+    const linkMatch = xml.match(/<link>([\s\S]*?)<\/link>/);
+    const itemBlocks = xml.split("<item>").slice(1);
+    const rawSources = itemBlocks.slice(0, 10).map((block) => {
+      const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
+      return sourceMatch ? decodeEntities(sourceMatch[1]) : "(intet source-tag)";
+    });
+    return {
+      label,
+      status: res.status,
+      feedLink: linkMatch ? decodeEntities(linkMatch[1]) : null,
+      rawItemCount: itemBlocks.length,
+      rawSources,
+    };
+  } catch (err) {
+    return { label, error: String(err) };
   }
+}
 
-  return NextResponse.json(results);
+export async function GET() {
+  const noHeader = await testVariant("uden Accept-Language", {});
+  const withHeader = await testVariant("med Accept-Language: da-DK", {
+    "Accept-Language": "da-DK,da;q=0.9",
+  });
+  return NextResponse.json({ noHeader, withHeader });
 }
