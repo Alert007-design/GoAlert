@@ -149,15 +149,31 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
 
 export type TopStory = FoundItem;
 
-// Samme domænebaserede søgning som fetchNews(), men cachet i 24 timer via
-// Next.js' fetch-cache, så Google News kun rammes én gang om dagen for
-// forsidepanelet. Denne cache må IKKE bruges i cron-jobbet (fetchNews) —
-// det skal altid have friske data.
-async function fetchCachedNews(keyword: string): Promise<FoundItem[]> {
-  // "when:2d" begrænser til de seneste to døgn, så panelet ikke kan finde
-  // gamle, men stadig "relevante" sider (fx en fast programside for en
-  // dokumentar) i stedet for reelt friske nyheder.
-  const query = `${keyword} when:2d ${SITE_CLAUSE}`;
+// Domæner der reelt er sladder-/kendisfokuserede, i modsætning til den
+// bredere DANISH_DOMAINS-liste ovenfor (som bruges til kundeovervågningen og
+// også indeholder seriøse medier som DR, Politiken, Berlingske). Det er
+// forskellen mellem "dansk kilde" og "dansk sladderkilde" — begge dele skal
+// være opfyldt, for at noget passer til dette panel.
+const GOSSIP_DOMAINS = ["seoghoer.dk", "billedbladet.dk", "eb.dk", "bt.dk"];
+const GOSSIP_TOPIC_WORDS = ["kendis", "reality", "underholdning", "royale"];
+
+// Cachet i 24 timer via Next.js' fetch-cache, så Google News kun rammes én
+// gang om dagen for forsidepanelet. Denne cache må IKKE bruges i cron-jobbet
+// (fetchNews) — det skal altid have friske data.
+//
+// "when:2d" begrænser til de seneste to døgn, så panelet ikke kan finde
+// gamle, men stadig "relevante" sider (fx en fast programside for en
+// dokumentar) i stedet for reelt friske nyheder.
+//
+// NB: Emneordene er samlet i ÉT opslag med OR imellem, i stedet for fire
+// separate opslag (ét pr. ord). Fire separate, snævre opslag — der hver
+// krævede ét bestemt ord OG en af 20 kilder OG under 2 dage gammelt — gav i
+// praksis for ofte nul eller kun ét resultat. Ét bredere opslag, hvor blot
+// ét af emneordene skal matche, finder markant mere.
+async function fetchGossipFeed(): Promise<FoundItem[]> {
+  const topicClause = "(" + GOSSIP_TOPIC_WORDS.join(" OR ") + ")";
+  const domainClause = "(" + GOSSIP_DOMAINS.map((d) => `site:${d}`).join(" OR ") + ")";
+  const query = `${topicClause} when:2d ${domainClause}`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
     query
   )}&hl=da&gl=DK&ceid=DK:da`;
@@ -168,12 +184,8 @@ async function fetchCachedNews(keyword: string): Promise<FoundItem[]> {
   }
 
   const xml = await res.text();
-  return parseGoogleNewsRss(xml, 10);
+  return parseGoogleNewsRss(xml, 20);
 }
-
-// Søgeord målrettet det, panelet skal handle om: kendisser, reality, fodbold
-// og underholdning.
-const GOSSIP_QUERIES = ["kendis", "reality", "fodbold Superligaen", "underholdning"];
 
 function stripSourceSuffix(title: string, source: string): string {
   const re = new RegExp(`\\s*-\\s*${escapeRegex(source)}$`, "i");
@@ -181,22 +193,25 @@ function stripSourceSuffix(title: string, source: string): string {
 }
 
 export async function fetchTopDanishStories(maxCount = 3): Promise<TopStory[]> {
-  const settled = await Promise.allSettled(GOSSIP_QUERIES.map((q) => fetchCachedNews(q)));
+  let items: FoundItem[] = [];
+  try {
+    items = await fetchGossipFeed();
+  } catch (err) {
+    console.error("Kunne ikke hente sladder-feed til forsiden:", err);
+    return [];
+  }
 
   const seenUrls = new Set<string>();
   const seenSources = new Set<string>();
   const stories: TopStory[] = [];
 
-  for (const result of settled) {
-    if (result.status !== "fulfilled") continue;
-    for (const item of result.value) {
-      if (stories.length >= maxCount) break;
-      if (seenUrls.has(item.url)) continue;
-      if (seenSources.has(item.source)) continue; // spred på tværs af kilder
-      seenUrls.add(item.url);
-      seenSources.add(item.source);
-      stories.push({ ...item, title: stripSourceSuffix(item.title, item.source) });
-    }
+  for (const item of items) {
+    if (stories.length >= maxCount) break;
+    if (seenUrls.has(item.url)) continue;
+    if (seenSources.has(item.source)) continue; // spred på tværs af kilder
+    seenUrls.add(item.url);
+    seenSources.add(item.source);
+    stories.push({ ...item, title: stripSourceSuffix(item.title, item.source) });
   }
 
   return stories;
