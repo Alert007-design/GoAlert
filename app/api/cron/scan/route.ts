@@ -28,61 +28,94 @@ export async function GET(req: NextRequest) {
     { newItems: number; sourceIssues: string[]; error?: string }
   > = {};
 
-  // Hver kunde behandles isoleret: én kundes fejl stopper ikke resten af kørslen
-  // (tidligere ville en enkelt fejl afbryde scanningen for alle øvrige kunder).
+  // Hver kunde behandles isoleret: én kundes fejl stopper ikke resten af kørslen.
   for (const customer of customers) {
-    const sourceIssues: string[] = [];
+    const sourceIssues = new Set<string>();
+    const newItemsByKeyword: Record<string, FoundItem[]> = {};
+
     try {
-      const [newsResult, redditResult] = await Promise.allSettled([
-        fetchNews(customer.keyword),
-        fetchReddit(customer.keyword),
-      ]);
-
-      const allItems: FoundItem[] = [];
-
-      if (newsResult.status === "fulfilled") {
-        allItems.push(...newsResult.value);
-      } else {
-        console.error(`Nyheds-scan fejlede for ${customer.email}:`, newsResult.reason);
-        sourceIssues.push("Nyhedskilder");
-      }
-
-      if (redditResult.status === "fulfilled") {
-        allItems.push(...redditResult.value);
-      } else {
-        console.error(`Reddit-scan fejlede for ${customer.email}:`, redditResult.reason);
-        sourceIssues.push("Reddit");
-      }
-
       const knownUrls = await getKnownUrls(customer.email);
-      const newItems = allItems.filter((item) => !knownUrls.has(item.url));
 
-      for (const item of newItems) {
-        await saveMention({
-          customerEmail: customer.email,
-          title: item.title,
-          url: item.url,
-          source: item.source,
-        });
+      // Hvert søgeord scannes for sig, i stedet for at slå hele det
+      // kommaseparerede felt op som én samlet søgesætning.
+      for (const keyword of customer.keywords) {
+        const [newsResult, redditResult] = await Promise.allSettled([
+          fetchNews(keyword),
+          fetchReddit(keyword),
+        ]);
+
+        const items: FoundItem[] = [];
+
+        if (newsResult.status === "fulfilled") {
+          items.push(...newsResult.value);
+        } else {
+          console.error(
+            `Nyheds-scan fejlede for ${customer.email} ("${keyword}"):`,
+            newsResult.reason
+          );
+          sourceIssues.add("Nyhedskilder");
+        }
+
+        if (redditResult.status === "fulfilled") {
+          items.push(...redditResult.value);
+        } else {
+          console.error(
+            `Reddit-scan fejlede for ${customer.email} ("${keyword}"):`,
+            redditResult.reason
+          );
+          sourceIssues.add("Reddit");
+        }
+
+        const freshItems = items.filter((item) => !knownUrls.has(item.url));
+
+        if (freshItems.length > 0) {
+          newItemsByKeyword[keyword] = freshItems;
+          for (const item of freshItems) {
+            // Undgå at samme URL kan blive rapporteret under flere søgeord
+            // i samme kørsel, hvis den matcher mere end ét.
+            knownUrls.add(item.url);
+            await saveMention({
+              customerEmail: customer.email,
+              title: item.title,
+              url: item.url,
+              source: item.source,
+            });
+          }
+        }
       }
 
-      if (newItems.length > 0) {
-        await sendAlertEmail(customer.email, customer.name, customer.keyword, newItems);
+      const totalNew = Object.values(newItemsByKeyword).reduce(
+        (sum, arr) => sum + arr.length,
+        0
+      );
+
+      if (totalNew > 0) {
+        await sendAlertEmail(
+          customer.email,
+          customer.name,
+          customer.keywords,
+          newItemsByKeyword
+        );
       } else {
-        // Tidligere blev der slet ikke sendt en mail her — kunden hørte intet,
-        // hvilket ikke kan skelnes fra at scanningen fejlede stille.
         await sendNoResultsEmail(
           customer.email,
           customer.name,
-          customer.keyword,
-          sourceIssues.length > 0 ? sourceIssues : undefined
+          customer.keywords,
+          sourceIssues.size > 0 ? Array.from(sourceIssues) : undefined
         );
       }
 
-      results[customer.email] = { newItems: newItems.length, sourceIssues };
+      results[customer.email] = {
+        newItems: totalNew,
+        sourceIssues: Array.from(sourceIssues),
+      };
     } catch (err) {
       console.error(`Scan-fejl for ${customer.email}:`, err);
-      results[customer.email] = { newItems: 0, sourceIssues, error: String(err) };
+      results[customer.email] = {
+        newItems: 0,
+        sourceIssues: Array.from(sourceIssues),
+        error: String(err),
+      };
       // Fortsæt til næste kunde i stedet for at afbryde hele kørslen.
     }
   }
