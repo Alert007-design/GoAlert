@@ -154,7 +154,10 @@ export type TopStory = FoundItem;
 // forsidepanelet. Denne cache må IKKE bruges i cron-jobbet (fetchNews) —
 // det skal altid have friske data.
 async function fetchCachedNews(keyword: string): Promise<FoundItem[]> {
-  const query = `${keyword} ${SITE_CLAUSE}`;
+  // "when:2d" begrænser til de seneste to døgn, så panelet ikke kan finde
+  // gamle, men stadig "relevante" sider (fx en fast programside for en
+  // dokumentar) i stedet for reelt friske nyheder.
+  const query = `${keyword} when:2d ${SITE_CLAUSE}`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
     query
   )}&hl=da&gl=DK&ceid=DK:da`;
