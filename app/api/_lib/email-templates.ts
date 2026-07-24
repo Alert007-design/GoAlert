@@ -7,11 +7,14 @@
 // CSS-variabler eller <style>-blokke pålideligt.
 //
 // Fontvalg: sitets Fraunces/Inter/IBM Plex Mono kan ikke indlæses i de fleste
-// mailklienter (Gmail og Outlook understøtter ikke @font-face i praksis), så
-// her bruges sikre fallback-stakke, der matcher den samme karakter:
+// mailklienter, så her bruges sikre fallback-stakke med samme karakter:
 //   - Fraunces (serif, overskrifter)      -> Georgia/Times New Roman/serif
 //   - Inter (sans, brødtekst)             -> system sans-serif-stak
 //   - IBM Plex Mono (mono, labels/knapper)-> Courier New/monospace
+//
+// En kunde kan have flere søgeord (kommasepareret i Airtable-feltet
+// "Keywords"). Resultat-mailen grupperer fund pr. søgeord i egne sektioner,
+// så flere søgeord ikke blandes sammen i én liste.
 
 import type { FoundItem } from "../cron/scan/sources";
 
@@ -20,8 +23,8 @@ import type { FoundItem } from "../cron/scan/sources";
 
 // FoundItem udvides lokalt med felter, som resultat-kortet gerne vil vise,
 // men som det nuværende scan-system (sources.ts) ikke leverer endnu:
-// publiceringsdato, resumé, kildetype og billede. Skabelonen viser dem,
-// hvis de findes, og springer dem elegant over, hvis ikke.
+// publiceringsdato, resumé, kildetype og billede. Skabelonen viser dem, hvis
+// de findes, og springer dem elegant over, hvis ikke.
 export interface EnrichedFoundItem extends FoundItem {
   publishedAt?: string;
   excerpt?: string;
@@ -39,9 +42,6 @@ const FONT_MONO = "'Courier New', Courier, monospace";
 
 // ---------- sikkerhed / hjælpefunktioner ----------
 
-// Al dynamisk tekst (titler, kilder, søgeord osv. fra scannede sider eller
-// brugerinput) skal HTML-escapes, før den sættes ind i mailen. Ellers kan en
-// ondsindet eller uheldigt formateret kilde-titel injicere HTML i mailen.
 function escapeHtml(input: string): string {
   return input
     .replace(/&/g, "&amp;")
@@ -55,7 +55,6 @@ function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Fremhæver søgeordet i en allerede HTML-escapet tekst.
 function highlightKeyword(escapedText: string, keyword: string): string {
   const escapedKeyword = escapeHtml(keyword).trim();
   if (!escapedKeyword) return escapedText;
@@ -85,12 +84,10 @@ function pluralize(count: number, singular: string, plural: string): string {
   return count === 1 ? singular : plural;
 }
 
-// Skjult preheader-tekst: vises som forhåndsvisning i indbakken (Gmail,
-// Outlook m.fl.), men ikke i selve mailteksten.
 function preheaderHtml(text: string): string {
   return `<div style="display:none; max-height:0; overflow:hidden; mso-hide:all; opacity:0;">${escapeHtml(
     text
-  )}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>`;
+  )}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>`;
 }
 
 // ---------- fælles layout ----------
@@ -209,6 +206,13 @@ function renderResultCard(item: EnrichedFoundItem, keyword: string): string {
   </tr>`;
 }
 
+// Overskrift for en søgeord-sektion, kun vist når kunden har mere end ét søgeord.
+function keywordSectionHeading(keyword: string): string {
+  return `<div style="font-family:${FONT_MONO}; font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:#8a93a6; margin:22px 0 8px;">&quot;${escapeHtml(
+    keyword
+  )}&quot;</div>`;
+}
+
 // ---------- offentlige skabelon-funktioner ----------
 
 export interface EmailPayload {
@@ -220,59 +224,88 @@ export interface EmailPayload {
 export function alertWithResultsEmail(opts: {
   recipientEmail: string;
   customerName?: string;
-  keyword: string;
-  items: EnrichedFoundItem[];
+  keywords: string[];
+  itemsByKeyword: Record<string, EnrichedFoundItem[]>;
 }): EmailPayload {
-  const { recipientEmail, customerName, keyword, items } = opts;
-  const keywordEscaped = escapeHtml(keyword);
+  const { recipientEmail, customerName, keywords, itemsByKeyword } = opts;
   const greeting = customerName ? `Hej ${escapeHtml(customerName)},` : "Hej,";
-  const count = items.length;
-  const countLabel = `${count} ${pluralize(count, "ny", "nye")} ${pluralize(
-    count,
-    "omtale",
-    "omtaler"
-  )}`;
 
-  const cardsHtml = items.map((item) => renderResultCard(item, keyword)).join("");
+  // Kun søgeord med reelle nye fund vises som sektioner.
+  const activeKeywords = keywords.filter(
+    (k) => (itemsByKeyword[k] || []).length > 0
+  );
+  const totalCount = activeKeywords.reduce(
+    (sum, k) => sum + (itemsByKeyword[k] || []).length,
+    0
+  );
+  const countLabel = `${totalCount} ${pluralize(
+    totalCount,
+    "ny",
+    "nye"
+  )} ${pluralize(totalCount, "omtale", "omtaler")}`;
+  const isSingleKeyword = activeKeywords.length === 1;
+
+  const headerTitle = isSingleKeyword
+    ? `${countLabel} af &quot;${escapeHtml(activeKeywords[0])}&quot;`
+    : `${countLabel} fundet`;
+
+  const sectionsHtml = activeKeywords
+    .map((keyword) => {
+      const items = itemsByKeyword[keyword] || [];
+      const cardsHtml = items
+        .map((item) => renderResultCard(item, keyword))
+        .join("");
+      return `${
+        isSingleKeyword ? "" : keywordSectionHeading(keyword)
+      }<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${cardsHtml}</table>`;
+    })
+    .join("");
 
   const bodyHtml = `
     <div style="font-family:${FONT_MONO}; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:#3abfad; margin:0 0 14px;">Early-warning for dit omdømme</div>
     <h1 style="font-family:${FONT_DISPLAY}; font-weight:600; font-size:22px; line-height:1.3; color:#edeae2; margin:0 0 14px;">
-      ${countLabel} af &quot;${keywordEscaped}&quot;
+      ${headerTitle}
     </h1>
     <p style="color:#c7c3b8; font-size:14px; line-height:1.6; margin:0 0 20px;">
-      ${greeting} Gossip Alert har fundet ${countLabel.toLowerCase()}, der matcher dit søgeord. Se dem herunder.
+      ${greeting} Gossip Alert har fundet ${countLabel.toLowerCase()}, der matcher ${
+    isSingleKeyword ? "dit søgeord" : "dine søgeord"
+  }. Se dem herunder.
     </p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-      ${cardsHtml}
-    </table>
+    ${sectionsHtml}
     <div style="margin-top:24px;">
       <a href="${SITE_URL}" style="display:inline-block; font-family:${FONT_MONO}; font-size:13px; color:#0a0f1c; background:#f2a93b; padding:12px 22px; border-radius:3px; text-decoration:none; font-weight:600;">Se alle omtaler</a>
     </div>
   `;
 
   const text = [
-    `${countLabel} af "${keyword}"`,
+    isSingleKeyword ? `${countLabel} af "${activeKeywords[0]}"` : `${countLabel} fundet`,
     "",
     `${greeting} Gossip Alert har fundet følgende:`,
     "",
-    ...items.map(
-      (i) =>
-        `- ${i.title} (${i.source})${
-          i.publishedAt ? `, ${formatDate(i.publishedAt)}` : ""
-        }\n  ${i.url}`
-    ),
-    "",
+    ...activeKeywords.flatMap((keyword) => [
+      `"${keyword}":`,
+      ...(itemsByKeyword[keyword] || []).map(
+        (i) =>
+          `- ${i.title} (${i.source})${
+            i.publishedAt ? `, ${formatDate(i.publishedAt)}` : ""
+          }\n  ${i.url}`
+      ),
+      "",
+    ]),
     `Administrer din overvågning: ${MANAGE_URL}`,
   ].join("\n");
 
+  const subject = isSingleKeyword
+    ? `Gossip Alert: ${countLabel} af "${activeKeywords[0]}"`
+    : `Gossip Alert: ${countLabel} fundet`;
+
+  const preheader = isSingleKeyword
+    ? `${countLabel} af "${activeKeywords[0]}" fundet — se dem her.`
+    : `${countLabel} fundet på tværs af dine søgeord — se dem her.`;
+
   return {
-    subject: `Gossip Alert: ${countLabel} af "${keyword}"`,
-    html: emailLayout({
-      preheader: `${countLabel} af "${keyword}" fundet — se dem her.`,
-      bodyHtml,
-      recipientEmail,
-    }),
+    subject,
+    html: emailLayout({ preheader, bodyHtml, recipientEmail }),
     text,
   };
 }
@@ -280,14 +313,15 @@ export function alertWithResultsEmail(opts: {
 export function alertNoResultsEmail(opts: {
   recipientEmail: string;
   customerName?: string;
-  keyword: string;
+  keywords: string[];
   // Udfyldes kun hvis en eller flere kilder reelt fejlede teknisk under scanningen
   // (adskilt fra "ingen fund", jf. kravet om ikke at forveksle de to situationer).
   sourceIssues?: string[];
 }): EmailPayload {
-  const { recipientEmail, customerName, keyword, sourceIssues } = opts;
-  const keywordEscaped = escapeHtml(keyword);
+  const { recipientEmail, customerName, keywords, sourceIssues } = opts;
   const greeting = customerName ? `Hej ${escapeHtml(customerName)},` : "Hej,";
+  const isSingle = keywords.length === 1;
+  const keywordListEscaped = keywords.map((k) => escapeHtml(k)).join(", ");
 
   const issuesHtml =
     sourceIssues && sourceIssues.length > 0
@@ -304,10 +338,18 @@ export function alertNoResultsEmail(opts: {
   const bodyHtml = `
     <div style="font-family:${FONT_MONO}; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:#3abfad; margin:0 0 14px;">Early-warning for dit omdømme</div>
     <h1 style="font-family:${FONT_DISPLAY}; font-weight:600; font-size:22px; line-height:1.3; color:#edeae2; margin:0 0 14px;">
-      Ingen nye omtaler af &quot;${keywordEscaped}&quot;
+      ${
+        isSingle
+          ? `Ingen nye omtaler af &quot;${keywordListEscaped}&quot;`
+          : "Ingen nye omtaler i dag"
+      }
     </h1>
     <p style="color:#c7c3b8; font-size:14px; line-height:1.6; margin:0 0 8px;">
-      ${greeting} Gossip Alert har gennemført dagens overvågning af &quot;${keywordEscaped}&quot; — der er ikke fundet nye relevante omtaler i denne omgang.
+      ${greeting} Gossip Alert har gennemført dagens overvågning af ${
+    isSingle
+      ? `&quot;${keywordListEscaped}&quot;`
+      : `dine søgeord (&quot;${keywordListEscaped}&quot;)`
+  } — der er ikke fundet nye relevante omtaler i denne omgang.
     </p>
     <p style="color:#8a93a6; font-size:13px; line-height:1.6; margin:0 0 8px;">
       Det er gode nyheder, og der er ikke noget, du behøver at gøre.
@@ -322,9 +364,11 @@ export function alertNoResultsEmail(opts: {
   `;
 
   const text = [
-    `Ingen nye omtaler af "${keyword}"`,
+    isSingle ? `Ingen nye omtaler af "${keywords[0]}"` : "Ingen nye omtaler i dag",
     "",
-    `${greeting} Gossip Alert har gennemført dagens overvågning af "${keyword}" — ingen nye relevante omtaler fundet.`,
+    `${greeting} Gossip Alert har gennemført dagens overvågning af ${
+      isSingle ? `"${keywords[0]}"` : `dine søgeord (${keywords.join(", ")})`
+    } — ingen nye relevante omtaler fundet.`,
     sourceIssues && sourceIssues.length > 0
       ? `Bemærk: ${sourceIssues.join(
           ", "
@@ -336,13 +380,17 @@ export function alertNoResultsEmail(opts: {
     .filter(Boolean)
     .join("\n");
 
+  const subject = isSingle
+    ? `Gossip Alert: ingen nye omtaler af "${keywords[0]}" i dag`
+    : "Gossip Alert: ingen nye omtaler i dag";
+
+  const preheader = isSingle
+    ? `Ingen nye omtaler af "${keywords[0]}" i dag. Overvågningen kører videre.`
+    : "Ingen nye omtaler af dine søgeord i dag. Overvågningen kører videre.";
+
   return {
-    subject: `Gossip Alert: ingen nye omtaler af "${keyword}" i dag`,
-    html: emailLayout({
-      preheader: `Ingen nye omtaler af "${keyword}" i dag. Overvågningen kører videre.`,
-      bodyHtml,
-      recipientEmail,
-    }),
+    subject,
+    html: emailLayout({ preheader, bodyHtml, recipientEmail }),
     text,
   };
 }
