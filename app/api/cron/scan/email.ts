@@ -12,14 +12,14 @@ import { sendViaResend } from "../../_lib/resend";
 export async function sendAlertEmail(
   toEmail: string,
   customerName: string,
-  keyword: string,
-  items: FoundItem[]
+  keywords: string[],
+  itemsByKeyword: Record<string, FoundItem[]>
 ) {
   const payload = alertWithResultsEmail({
     recipientEmail: toEmail,
     customerName: customerName || undefined,
-    keyword,
-    items: items as EnrichedFoundItem[],
+    keywords,
+    itemsByKeyword: itemsByKeyword as Record<string, EnrichedFoundItem[]>,
   });
 
   await sendViaResend({
@@ -30,19 +30,20 @@ export async function sendAlertEmail(
   });
 }
 
-// Ny: sendes når scanningen er gennemført, men intet nyt er fundet.
-// sourceIssues bruges til at fortælle, hvis en kilde reelt fejlede teknisk,
-// så det ikke fremstår som om overvågningen bare ikke fandt noget.
+// Sendes når scanningen er gennemført, men intet nyt er fundet for nogen af
+// kundens søgeord. sourceIssues bruges til at fortælle, hvis en kilde reelt
+// fejlede teknisk, så det ikke fremstår som om overvågningen bare ikke fandt
+// noget.
 export async function sendNoResultsEmail(
   toEmail: string,
   customerName: string,
-  keyword: string,
+  keywords: string[],
   sourceIssues?: string[]
 ) {
   const payload = alertNoResultsEmail({
     recipientEmail: toEmail,
     customerName: customerName || undefined,
-    keyword,
+    keywords,
     sourceIssues,
   });
 
