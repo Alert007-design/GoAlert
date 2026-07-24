@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
 
-// Midlertidig diagnose-route: tester om "site:"-operatoren kan tvinge
-// resultater fra specifikke danske domæner, uanset Googles geo-gæt på
-// sprog/land (som vi lige har bekræftet ignorerer både URL-parametre og
-// Accept-Language-headeren).
-//
-// Slet denne fil igen, når fejlen er fundet og løst.
-
 function decodeEntities(text: string): string {
   return text
     .replace(/&amp;/g, "&")
@@ -19,10 +12,15 @@ function decodeEntities(text: string): string {
     .trim();
 }
 
+const DOMAINS = [
+  "dr.dk", "tv2.dk", "politiken.dk", "jyllands-posten.dk", "berlingske.dk",
+  "eb.dk", "bt.dk", "information.dk", "kristeligt-dagblad.dk", "weekendavisen.dk",
+  "altinget.dk", "finans.dk", "borsen.dk", "nordjyske.dk", "jv.dk",
+  "fyens.dk", "seoghoer.dk", "billedbladet.dk", "femina.dk", "alt.dk",
+];
+
 async function testQuery(label: string, q: string) {
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-    q
-  )}&hl=da&gl=DK&ceid=DK:da`;
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=da&gl=DK&ceid=DK:da`;
   try {
     const res = await fetch(url);
     const xml = res.ok ? await res.text() : "";
@@ -35,18 +33,16 @@ async function testQuery(label: string, q: string) {
       if (titleMatch) rawTitles.push(decodeEntities(titleMatch[1]));
       rawSources.push(sourceMatch ? decodeEntities(sourceMatch[1]) : "(intet)");
     }
-    return { label, query: q, status: res.status, rawItemCount: itemBlocks.length, rawSources, rawTitles };
+    return { label, queryLength: q.length, status: res.status, rawItemCount: itemBlocks.length, rawSources, rawTitles };
   } catch (err) {
     return { label, error: String(err) };
   }
 }
 
 export async function GET() {
-  const a = await testQuery("kendis + ét dansk site", "kendis site:eb.dk");
-  const b = await testQuery(
-    "kendis + flere danske sites (OR)",
-    "kendis (site:eb.dk OR site:seoghoer.dk OR site:billedbladet.dk OR site:dr.dk)"
-  );
-  const c = await testQuery("almindelig kendis (uden site)", "kendis");
-  return NextResponse.json({ a, b, c });
+  const siteClause = "(" + DOMAINS.map((d) => `site:${d}`).join(" OR ") + ")";
+  const kendis = await testQuery("kendis + 20 domæner", `kendis ${siteClause}`);
+  const trump = await testQuery("Trump + 20 domæner", `Trump ${siteClause}`);
+  const foodboldSuperliga = await testQuery("Superligaen + 20 domæner", `Superligaen ${siteClause}`);
+  return NextResponse.json({ kendis, trump, foodboldSuperliga });
 }
