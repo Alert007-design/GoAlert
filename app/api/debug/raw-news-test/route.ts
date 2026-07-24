@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-// Midlertidig diagnose-route: tester om en Accept-Language-header får Google
-// News til at respektere dansk sprog/land, i stedet for at geo-gætte ud fra
-// serverens IP-adresse (som gav norske resultater).
+// Midlertidig diagnose-route: tester om "site:"-operatoren kan tvinge
+// resultater fra specifikke danske domæner, uanset Googles geo-gæt på
+// sprog/land (som vi lige har bekræftet ignorerer både URL-parametre og
+// Accept-Language-headeren).
 //
 // Slet denne fil igen, når fejlen er fundet og løst.
-const QUERY = "kendis";
 
 function decodeEntities(text: string): string {
   return text
@@ -19,35 +19,34 @@ function decodeEntities(text: string): string {
     .trim();
 }
 
-async function testVariant(label: string, headers: Record<string, string>) {
+async function testQuery(label: string, q: string) {
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-    QUERY
+    q
   )}&hl=da&gl=DK&ceid=DK:da`;
   try {
-    const res = await fetch(url, { headers });
+    const res = await fetch(url);
     const xml = res.ok ? await res.text() : "";
-    const linkMatch = xml.match(/<link>([\s\S]*?)<\/link>/);
     const itemBlocks = xml.split("<item>").slice(1);
-    const rawSources = itemBlocks.slice(0, 10).map((block) => {
+    const rawSources: string[] = [];
+    const rawTitles: string[] = [];
+    for (const block of itemBlocks.slice(0, 10)) {
+      const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
       const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
-      return sourceMatch ? decodeEntities(sourceMatch[1]) : "(intet source-tag)";
-    });
-    return {
-      label,
-      status: res.status,
-      feedLink: linkMatch ? decodeEntities(linkMatch[1]) : null,
-      rawItemCount: itemBlocks.length,
-      rawSources,
-    };
+      if (titleMatch) rawTitles.push(decodeEntities(titleMatch[1]));
+      rawSources.push(sourceMatch ? decodeEntities(sourceMatch[1]) : "(intet)");
+    }
+    return { label, query: q, status: res.status, rawItemCount: itemBlocks.length, rawSources, rawTitles };
   } catch (err) {
     return { label, error: String(err) };
   }
 }
 
 export async function GET() {
-  const noHeader = await testVariant("uden Accept-Language", {});
-  const withHeader = await testVariant("med Accept-Language: da-DK", {
-    "Accept-Language": "da-DK,da;q=0.9",
-  });
-  return NextResponse.json({ noHeader, withHeader });
+  const a = await testQuery("kendis + ét dansk site", "kendis site:eb.dk");
+  const b = await testQuery(
+    "kendis + flere danske sites (OR)",
+    "kendis (site:eb.dk OR site:seoghoer.dk OR site:billedbladet.dk OR site:dr.dk)"
+  );
+  const c = await testQuery("almindelig kendis (uden site)", "kendis");
+  return NextResponse.json({ a, b, c });
 }
