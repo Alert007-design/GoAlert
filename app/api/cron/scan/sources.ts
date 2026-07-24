@@ -145,7 +145,43 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
   return items;
 }
 
-// ---------- forsidens "Danmark lige nu"-panel ----------
+// ---------- Folketingets åbne data (Fase 3) ----------
+
+// Folketingets egen åbne OData-API (oda.ft.dk) — gratis, ingen nøgle
+// nødvendig, officielt sanktioneret. Søger i "Sag" (lovforslag,
+// beslutningsforslag, forespørgsler m.v.) efter titler, der indeholder
+// søgeordet. Særligt relevant for kunder, der overvåger politikere, partier
+// eller politiske emner.
+//
+// Kilde til API-struktur: oda.ft.dk's egen dokumentation og
+// eksempelforespørgsler (substringof-filter på "titel"-feltet).
+export async function fetchFolketinget(keyword: string): Promise<FoundItem[]> {
+  const escapedKeyword = keyword.replace(/'/g, "''"); // OData-escaping af enkelt-anførselstegn
+  const filter = `substringof('${escapedKeyword}',titel)`;
+  const url =
+    `https://oda.ft.dk/api/Sag?$format=json&$top=10&$orderby=opdateringsdato desc` +
+    `&$filter=${encodeURIComponent(filter)}`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Folketingets åbne data svarede med status ${res.status}`);
+  }
+
+  const data = await res.json();
+  const rows: any[] = data.value || [];
+
+  return rows
+    .filter((sag) => sag.titel)
+    .map((sag) => ({
+      title: sag.titel as string,
+      // oda.ft.dk leverer ikke selv et menneskelæsbart link pr. sag — vi
+      // linker derfor til Folketingets egen søgning på sagens titel, så
+      // brugeren kan finde og læse den fulde sag.
+      url: `https://www.ft.dk/da/search?as=1&q=${encodeURIComponent(sag.titel)}`,
+      source: "Folketinget (åbne data)",
+    }));
+}
+
 
 export type TopStory = FoundItem;
 
@@ -216,3 +252,4 @@ export async function fetchTopDanishStories(maxCount = 3): Promise<TopStory[]> {
 
   return stories;
 }
+
