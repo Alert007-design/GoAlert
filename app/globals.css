@@ -292,6 +292,14 @@ input:focus-visible {
   color: var(--muted);
 }
 
+.panelNote {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin: 8px 0 0;
+  opacity: 0.8;
+}
+
 .signalBars {
   display: flex;
   align-items: flex-end;
@@ -347,55 +355,82 @@ input:focus-visible {
   }
 }
 
-.feed {
+.storyList {
   list-style: none;
   margin: 0;
   padding: 0;
-  height: 220px;
-  overflow: hidden;
-  position: relative;
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    black 24px,
-    black calc(100% - 24px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    black 24px,
-    black calc(100% - 24px),
-    transparent 100%
-  );
-  animation: feedScroll 18s linear infinite;
 }
 
-.feedItem {
-  display: flex;
-  gap: 12px;
-  padding: 10px 2px;
+.storyItem {
+  padding: 14px 2px;
   border-bottom: 1px solid var(--line);
-  font-size: 0.85rem;
 }
 
-.feedTime {
+.storyItem:last-child {
+  border-bottom: none;
+}
+
+.storyTitle {
+  display: block;
+  color: var(--paper);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.storyTitle:hover {
+  color: var(--amber);
+}
+
+.storyMeta {
   font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--muted);
-  flex-shrink: 0;
+  margin-top: 5px;
 }
 
-.feedText {
+.storyExcerpt {
   color: var(--paper-dim);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin: 6px 0 0;
 }
 
-@keyframes feedScroll {
-  0% {
-    transform: translateY(0);
-  }
-  100% {
-    transform: translateY(-50%);
-  }
+.storyFallback {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 14px 2px;
+}
+
+/* ---------- explainer ---------- */
+
+.explainer {
+  padding: 96px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.explainerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 40px 48px;
+  margin-top: 28px;
+}
+
+.explainerBlock h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1.2rem;
+  margin: 0 0 10px;
+}
+
+.explainerBlock p {
+  color: var(--paper-dim);
+  line-height: 1.6;
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 /* ---------- process ---------- */
@@ -437,6 +472,92 @@ input:focus-visible {
   line-height: 1.6;
   margin: 0;
   font-size: 0.95rem;
+}
+
+/* ---------- pricing ---------- */
+
+.pricing {
+  padding: 96px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pricingTitle {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(1.6rem, 3vw, 2.1rem);
+  margin: 0 0 16px;
+  max-width: 26ch;
+}
+
+.pricingIntro {
+  color: var(--paper-dim);
+  line-height: 1.6;
+  max-width: 60ch;
+  margin: 0 0 36px;
+  font-size: 0.98rem;
+}
+
+.pricingGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+
+.priceCard {
+  background: var(--ink-900);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 22px 18px;
+  text-align: center;
+}
+
+.priceCard--free {
+  border-color: rgba(58, 191, 173, 0.35);
+}
+
+.priceLabel {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 10px;
+}
+
+.priceValue {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--paper);
+  margin: 0;
+}
+
+.priceUnit {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+.pricingNotes {
+  list-style: none;
+  margin: 32px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.pricingNotes li {
+  font-size: 0.9rem;
+  color: var(--paper-dim);
+  padding-left: 22px;
+  position: relative;
+}
+
+.pricingNotes li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--teal);
 }
 
 /* ---------- closing ---------- */
@@ -486,7 +607,10 @@ input:focus-visible {
 
 .footerInner {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   font-family: var(--font-mono);
   font-size: 0.8rem;
   color: var(--muted);
@@ -494,6 +618,73 @@ input:focus-visible {
 
 .footerMuted {
   color: var(--muted);
+}
+
+.footerLinks {
+  display: flex;
+  gap: 18px;
+}
+
+.footerLinks a {
+  color: var(--muted);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.footerLinks a:hover {
+  color: var(--paper);
+}
+
+/* ---------- legal pages (privatliv, vilkaar) ---------- */
+
+.legalPage {
+  padding: 64px 0 96px;
+}
+
+.legalPage h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  margin: 0 0 8px;
+}
+
+.legalUpdated {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 40px;
+}
+
+.legalPage h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 1.3rem;
+  margin: 36px 0 12px;
+}
+
+.legalPage p,
+.legalPage li {
+  color: var(--paper-dim);
+  line-height: 1.7;
+  font-size: 0.98rem;
+}
+
+.legalPage ul {
+  padding-left: 20px;
+}
+
+.legalPlaceholder {
+  color: var(--amber);
+}
+
+.legalBack {
+  display: inline-block;
+  margin-bottom: 32px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--teal);
+  text-decoration: none;
 }
 
 /* ---------- responsive ---------- */
@@ -504,16 +695,27 @@ input:focus-visible {
     gap: 48px;
   }
 
+  .explainerGrid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
   .processGrid {
     grid-template-columns: 1fr;
     gap: 32px;
+  }
+
+  .pricingGrid {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .hero {
     padding: 56px 0 64px;
   }
 
+  .explainer,
   .process,
+  .pricing,
   .closing {
     padding: 64px 0;
   }
@@ -529,6 +731,15 @@ input:focus-visible {
   }
 
   .closingInner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pricingGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .footerInner {
     flex-direction: column;
     align-items: flex-start;
   }
