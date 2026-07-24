@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActiveCustomers, getKnownUrls, saveMention } from "./airtable";
-import { fetchNews, fetchReddit, FoundItem } from "./sources";
+import { fetchNews, fetchReddit, fetchFolketinget, FoundItem } from "./sources";
 import { sendAlertEmail, sendNoResultsEmail } from "./email";
 
 export const maxDuration = 60;
@@ -39,9 +39,10 @@ export async function GET(req: NextRequest) {
       // Hvert søgeord scannes for sig, i stedet for at slå hele det
       // kommaseparerede felt op som én samlet søgesætning.
       for (const keyword of customer.keywords) {
-        const [newsResult, redditResult] = await Promise.allSettled([
+        const [newsResult, redditResult, folketingetResult] = await Promise.allSettled([
           fetchNews(keyword),
           fetchReddit(keyword),
+          fetchFolketinget(keyword),
         ]);
 
         const items: FoundItem[] = [];
@@ -64,6 +65,16 @@ export async function GET(req: NextRequest) {
             redditResult.reason
           );
           sourceIssues.add("Reddit");
+        }
+
+        if (folketingetResult.status === "fulfilled") {
+          items.push(...folketingetResult.value);
+        } else {
+          console.error(
+            `Folketinget-scan fejlede for ${customer.email} ("${keyword}"):`,
+            folketingetResult.reason
+          );
+          sourceIssues.add("Folketinget");
         }
 
         const freshItems = items.filter((item) => !knownUrls.has(item.url));
