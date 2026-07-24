@@ -16,6 +16,10 @@ function decodeEntities(text: string): string {
     .trim();
 }
 
+function stripHtml(text: string): string {
+  return decodeEntities(text.replace(/<[^>]*>/g, "")).trim();
+}
+
 // Kendte danske medier. Google News' hl=da&gl=DK er kun en blød bias, ikke et
 // hårdt landefilter — dansk og norsk ligger sprogligt så tæt på hinanden, at
 // norske kilder (VG, Aftenposten, Nettavisen, Adressa m.fl.) ofte slipper
@@ -25,23 +29,14 @@ function decodeEntities(text: string): string {
 // Listen er ikke udtømmende — mindre eller meget lokale danske medier, der
 // ikke står her, vil blive sorteret fra. Sig til, hvis et rigtigt dansk
 // medie mangler på listen, så tilføjer vi det.
+//
+// NB: "TV 2"/"TV2" er bevidst ikke på listen — navnet deles af den danske og
+// den norske TV 2, og kan ikke skelnes ud fra kildenavnet alene. At inkludere
+// det gav falske positiver fra norsk TV 2. Sig til, hvis I hellere vil have
+// det med, på trods af risikoen for norsk støj.
 const DANISH_SOURCES = [
   "dr",
   "dr nyheder",
-  "tv 2",
-  "tv2",
-  "tv 2 nyheder",
-  "tv2 nyheder",
-  "tv 2 news",
-  "tv2 news",
-  "tv2 lorry",
-  "tv2 kosmopol",
-  "tv2 nord",
-  "tv2 fyn",
-  "tv2 øst",
-  "tv2 østjylland",
-  "tv2 syd",
-  "tv2 bornholm",
   "politiken",
   "jyllands-posten",
   "jyllandsposten",
@@ -80,9 +75,21 @@ const DANISH_SOURCES = [
   "licitationen",
   "kommunen.dk",
   "avisen.dk",
+  // Kendis- og sladdermedier — særligt relevante for et produkt som Gossip Alert.
+  "se og hør",
+  "seoghør",
+  "seoghoer",
+  "billed-bladet",
+  "billedbladet",
+  "her&nu",
+  "her og nu",
+  "herognu",
+  "femina",
+  "alt for damerne",
+  "isabellas",
 ];
 
-function isDanishSource(sourceName: string): boolean {
+export function isDanishSource(sourceName: string): boolean {
   const normalized = sourceName.toLowerCase().trim();
   if (!normalized) return false;
   // Domænenavne der tydeligt slutter på .dk regnes som danske uden videre.
@@ -90,6 +97,30 @@ function isDanishSource(sourceName: string): boolean {
   return DANISH_SOURCES.some(
     (known) => normalized === known || normalized.includes(known)
   );
+}
+
+function parseGoogleNewsRss(xml: string, maxItems: number): FoundItem[] {
+  const items: FoundItem[] = [];
+  const itemBlocks = xml.split("<item>").slice(1);
+  for (const block of itemBlocks.slice(0, maxItems)) {
+    const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
+    const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
+    const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
+    if (titleMatch && linkMatch) {
+      const sourceName = sourceMatch
+        ? decodeEntities(sourceMatch[1])
+        : "Google News";
+      if (!isDanishSource(sourceName)) {
+        continue; // spring ikke-danske kilder over
+      }
+      items.push({
+        title: decodeEntities(titleMatch[1]),
+        url: decodeEntities(linkMatch[1]),
+        source: sourceName,
+      });
+    }
+  }
+  return items;
 }
 
 // NB: Tidligere fangede denne funktion ALLE fejl (netværksfejl, ikke-ok svar,
@@ -109,27 +140,7 @@ export async function fetchNews(keyword: string): Promise<FoundItem[]> {
   }
 
   const xml = await res.text();
-  const items: FoundItem[] = [];
-  const itemBlocks = xml.split("<item>").slice(1);
-  for (const block of itemBlocks.slice(0, 10)) {
-    const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
-    const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
-    const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
-    if (titleMatch && linkMatch) {
-      const sourceName = sourceMatch
-        ? decodeEntities(sourceMatch[1])
-        : "Google News";
-      if (!isDanishSource(sourceName)) {
-        continue; // spring ikke-danske kilder over
-      }
-      items.push({
-        title: decodeEntities(titleMatch[1]),
-        url: decodeEntities(linkMatch[1]),
-        source: sourceName,
-      });
-    }
-  }
-  return items;
+  return parseGoogleNewsRss(xml, 10);
 }
 
 // Samme princip som ovenfor: en fejl fra Reddit (fx 403, som er kendt for at
@@ -154,4 +165,74 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
     source: `Reddit (r/${c.data.subreddit})`,
   }));
   return items;
+}
+
+// ---------- forsidens "Danmark lige nu"-panel ----------
+
+export type TopStory = FoundItem & { excerpt?: string };
+
+// Henter Google News' danske forside-feed (ikke søgeordsbaseret) og
+// filtrerer til danske kilder, ligesom fetchNews(). Bruges kun til det
+// redaktionelle panel på forsiden — ikke til kundeovervågningen.
+//
+// Cachet i 24 timer via Next.js' fetch-cache (se kaldet i page.tsx), så
+// Google News kun rammes én gang om dagen, uanset hvor mange besøgende der
+// er på siden.
+export async function fetchTopDanishStories(maxCount = 3): Promise<TopStory[]> {
+  const url = "https://news.google.com/rss?hl=da&gl=DK&ceid=DK:da";
+
+  const res = await fetch(url, {
+    next: { revalidate: 86400 },
+  });
+  if (!res.ok) {
+    throw new Error(`Google News forside-feed svarede med status ${res.status}`);
+  }
+
+  const xml = await res.text();
+  const itemBlocks = xml.split("<item>").slice(1);
+
+  const seenSources = new Set<string>();
+  const stories: TopStory[] = [];
+
+  for (const block of itemBlocks) {
+    if (stories.length >= maxCount) break;
+
+    const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
+    const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
+    const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
+    const descMatch = block.match(/<description>([\s\S]*?)<\/description>/);
+    if (!titleMatch || !linkMatch) continue;
+
+    const sourceName = sourceMatch ? decodeEntities(sourceMatch[1]) : "Google News";
+    if (!isDanishSource(sourceName)) continue;
+
+    // Foretræk spredning på tværs af kilder, så panelet ikke viser 3
+    // historier fra samme medie.
+    if (seenSources.has(sourceName)) continue;
+    seenSources.add(sourceName);
+
+    const rawTitle = decodeEntities(titleMatch[1]);
+    // Google News' titler har ofte " - Kildenavn" til sidst; det er allerede
+    // vist separat, så det fjernes for at undgå gentagelse.
+    const title = rawTitle.replace(new RegExp(`\\s*-\\s*${sourceName}$`), "").trim();
+
+    let excerpt: string | undefined;
+    if (descMatch) {
+      const cleaned = stripHtml(descMatch[1]);
+      // Google News' description er ofte bare titlen gentaget — spring den
+      // over i så fald, i stedet for at vise den samme tekst to gange.
+      if (cleaned && cleaned.toLowerCase() !== rawTitle.toLowerCase()) {
+        excerpt = cleaned;
+      }
+    }
+
+    stories.push({
+      title,
+      url: decodeEntities(linkMatch[1]),
+      source: sourceName,
+      excerpt,
+    });
+  }
+
+  return stories;
 }
