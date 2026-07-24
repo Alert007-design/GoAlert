@@ -116,9 +116,6 @@ export default async function Home() {
                       {story.title}
                     </a>
                     <div className="storyMeta">{story.source}</div>
-                    {story.excerpt ? (
-                      <p className="storyExcerpt">{story.excerpt}</p>
-                    ) : null}
                   </li>
                 ))}
               </ul>
