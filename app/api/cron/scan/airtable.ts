@@ -11,8 +11,19 @@ export type Customer = {
   id: string;
   name: string;
   email: string;
-  keyword: string;
+  keywords: string[];
 };
+
+// Feltet "Keywords" i Airtable kan indeholde flere søgeord adskilt af komma
+// (fx "Gulspurve, nattergale"). Denne funktion splitter dem til en liste, så
+// hvert søgeord kan scannes for sig i stedet for som én samlet sætning.
+function parseKeywords(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
 
 export async function getActiveCustomers(): Promise<Customer[]> {
   const baseId = process.env.AIRTABLE_BASE_ID;
@@ -29,12 +40,9 @@ export async function getActiveCustomers(): Promise<Customer[]> {
       id: r.id,
       name: r.fields.Name || "",
       email: r.fields.Email || "",
-      // Feltet hedder "Keywords" (flertal) i Airtable i dag, ikke "Keyword" —
-      // den tidligere kode læste det forkerte feltnavn, hvilket gjorde denne
-      // værdi altid tom og filtrerede samtlige kunder væk nedenfor.
-      keyword: r.fields.Keywords || "",
+      keywords: parseKeywords(r.fields.Keywords),
     }))
-    .filter((c: Customer) => c.email && c.keyword);
+    .filter((c: Customer) => c.email && c.keywords.length > 0);
 }
 
 export async function getKnownUrls(customerEmail: string): Promise<Set<string>> {
