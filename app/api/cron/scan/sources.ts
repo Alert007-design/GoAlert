@@ -21,90 +21,64 @@ function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Kendte danske medier. Google News' hl=da&gl=DK er kun en blød bias, ikke et
-// hårdt landefilter — dansk og norsk ligger sprogligt så tæt på hinanden, at
-// norske kilder ofte slipper igennem alligevel. Denne liste bruges til at
-// filtrere resultaterne, så kun genkendte danske medier beholdes.
+// VIGTIG BAGGRUND (fundet ved fejlsøgning 24/7-2026):
+// Google News' "hl=da&gl=DK&ceid=DK:da"-parametre bliver IGNORERET af Google,
+// som i stedet geo-lokaliserer ud fra den kaldende servers IP-adresse — og
+// Vercel-funktionens IP geo-lokaliseres til Norge (bekræftet: Google svarede
+// selv med hl=no&gl=NO&ceid=NO:no i sit eget feed, uanset hvad vi bad om, og
+// selv en Accept-Language: da-DK-header ændrede intet). Det er derfor norske
+// kilder som VG, Aftenposten og Nettavisen konsekvent er dukket op.
 //
-// Listen er ikke udtømmende — mindre eller meget lokale danske medier, der
-// ikke står her, vil blive sorteret fra. Sig til, hvis et rigtigt dansk
-// medie mangler på listen, så tilføjer vi det.
-//
-// NB: "TV 2"/"TV2" er bevidst ikke på listen — navnet deles af den danske og
-// den norske TV 2, og kan ikke skelnes ud fra kildenavnet alene.
-const DANISH_SOURCES = [
-  "dr",
-  "dr nyheder",
-  "politiken",
-  "jyllands-posten",
-  "jyllandsposten",
-  "jp",
-  "berlingske",
-  "ekstra bladet",
-  "ekstrabladet",
-  "b.t.",
-  "bt",
-  "information",
-  "kristeligt dagblad",
-  "weekendavisen",
-  "altinget",
-  "mandag morgen",
-  "zetland",
-  "finans",
-  "finanswatch",
-  "børsen",
-  "boersen",
-  "watch medier",
-  "nordjyske",
-  "jydskevestkysten",
-  "fyens stiftstidende",
+// Løsningen er at binde søgningen direkte til navngivne danske domæner med
+// Googles "site:"-operator, som er en hård indholdsfiltrering og IKKE
+// påvirkes af geo-gætteriet. Det er nu den primære mekanisme for dansk
+// indhold — testet og bekræftet med "kendis", "Trump" og "Superligaen", som
+// alle gav 100% danske kilder (B.T., Berlingske, Politiken, DR, TV 2).
+const DANISH_DOMAINS = [
+  "dr.dk",
+  "tv2.dk",
+  "politiken.dk",
+  "jyllands-posten.dk",
+  "berlingske.dk",
+  "eb.dk",
+  "bt.dk",
+  "information.dk",
+  "kristeligt-dagblad.dk",
+  "weekendavisen.dk",
+  "altinget.dk",
+  "finans.dk",
+  "borsen.dk",
+  "nordjyske.dk",
+  "jv.dk",
   "fyens.dk",
-  "fyns amts avis",
-  "randers amtsavis",
-  "sjællandske",
-  "sjaellandske",
-  "frederiksborg amts avis",
-  "dagbladet ringkøbing-skjern",
-  "herning folkeblad",
-  "vestkysten",
-  "ritzau",
-  "dagens.dk",
-  "dagens medicin",
-  "licitationen",
-  "kommunen.dk",
-  "avisen.dk",
-  // Kendis- og sladdermedier — særligt relevante for et produkt som Gossip Alert.
-  "se og hør",
-  "seoghør",
-  "seoghoer",
-  "billed-bladet",
-  "billedbladet",
-  "her&nu",
-  "her og nu",
-  "herognu",
-  "femina",
-  "alt for damerne",
-  "isabellas",
+  "seoghoer.dk",
+  "billedbladet.dk",
+  "femina.dk",
+  "alt.dk",
 ];
 
-// NB: Tidligere brugte denne funktion "normalized.includes(known)", hvilket
-// betød at korte navne som "dr" eller "finans" matchede som en delstreng
-// midt i et helt andet ord — fx matchede "dr" i "Drammens Tidende", og
-// "finans" matchede i "Finansavisen" (begge norske). Det lukkede norsk
-// indhold ind, selvom filteret så ud til at virke. Nu kræves der et helt
-// ord (afgrænset af mellemrum eller start/slut af navnet), så en delstreng
-// midt i et andet ord ikke længere tæller som match.
+const SITE_CLAUSE = "(" + DANISH_DOMAINS.map((d) => `site:${d}`).join(" OR ") + ")";
+
+// Bevaret som en ekstra sikkerhedskontrol (defense in depth) efter
+// domænefilteret ovenfor — ikke længere den primære mekanisme, men et
+// billigt sidste filter, hvis Google mod forventning skulle returnere noget
+// uden for de navngivne domæner.
+const DANISH_SOURCE_NAMES = [
+  "dr", "dr nyheder", "politiken", "jyllands-posten", "jyllandsposten", "jp",
+  "berlingske", "ekstra bladet", "ekstrabladet", "b.t.", "bt", "information",
+  "kristeligt dagblad", "weekendavisen", "altinget", "finans", "børsen",
+  "boersen", "nordjyske", "jydskevestkysten", "fyens stiftstidende",
+  "se og hør", "seoghør", "seoghoer", "billed-bladet", "billedbladet",
+  "femina", "alt for damerne",
+];
+
 export function isDanishSource(sourceName: string): boolean {
   const normalized = sourceName.toLowerCase().trim();
   if (!normalized) return false;
-  // Domænenavne der tydeligt slutter på .dk regnes som danske uden videre.
   if (/\.dk$/i.test(normalized)) return true;
-  return DANISH_SOURCES.some((known) => {
+  return DANISH_SOURCE_NAMES.some((known) => {
     if (normalized === known) return true;
-    const wordBoundaryMatch = new RegExp(
-      `(^|\\s)${escapeRegex(known)}(\\s|$)`,
-      "i"
-    );
+    const wordBoundaryMatch = new RegExp(`(^|\\s)${escapeRegex(known)}(\\s|$)`, "i");
     return wordBoundaryMatch.test(normalized);
   });
 }
@@ -117,12 +91,8 @@ function parseGoogleNewsRss(xml: string, maxItems: number): FoundItem[] {
     const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
     const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
     if (titleMatch && linkMatch) {
-      const sourceName = sourceMatch
-        ? decodeEntities(sourceMatch[1])
-        : "Google News";
-      if (!isDanishSource(sourceName)) {
-        continue; // spring ikke-danske kilder over
-      }
+      const sourceName = sourceMatch ? decodeEntities(sourceMatch[1]) : "Google News";
+      if (!isDanishSource(sourceName)) continue; // ekstra sikkerhedsnet
       items.push({
         title: decodeEntities(titleMatch[1]),
         url: decodeEntities(linkMatch[1]),
@@ -133,15 +103,12 @@ function parseGoogleNewsRss(xml: string, maxItems: number): FoundItem[] {
   return items;
 }
 
-// NB: Tidligere fangede denne funktion ALLE fejl (netværksfejl, ikke-ok svar,
-// parse-fejl) og returnerede stille en tom liste. Det gjorde det umuligt at
-// skelne "ingen nye omtaler" fra "kilden kunne ikke tjekkes" i scan-jobbet.
-// Nu kastes en reel fejl videre til kalderen (scan/route.ts), som fanger den
-// med Promise.allSettled og rapporterer den korrekt som en kildefejl i mailen.
-// En tom liste herfra betyder nu udelukkende: kaldet lykkedes, men fandt intet.
+// Bruges af selve kundeovervågningen (scan-jobbet). Skal ALTID hente friske
+// data — ingen cache — da cron-jobbet tjekker for nye artikler hver gang.
 export async function fetchNews(keyword: string): Promise<FoundItem[]> {
+  const query = `${keyword} ${SITE_CLAUSE}`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-    keyword
+    query
   )}&hl=da&gl=DK&ceid=DK:da`;
 
   const res = await fetch(url);
@@ -153,9 +120,10 @@ export async function fetchNews(keyword: string): Promise<FoundItem[]> {
   return parseGoogleNewsRss(xml, 10);
 }
 
-// Samme princip som ovenfor: en fejl fra Reddit (fx 403, som er kendt for at
-// ramme forespørgsler fra server-IP'er som Vercels) skal kastes videre, ikke
-// skjules som "ingen resultater".
+// Reddit er droppet som kilde (se tidligere beslutning: Reddit blokerer
+// forespørgsler fra server-IP'er med 403, og officiel kommerciel API-adgang
+// kræver nu forudgående godkendelse og har en betydelig minimumspris).
+// Funktionen er bevaret, men bruges ikke længere i scan/route.ts.
 export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
   const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(
     keyword
@@ -181,13 +149,14 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
 
 export type TopStory = FoundItem;
 
-// Samme Google News-søgning som fetchNews(), men cachet i 24 timer via
+// Samme domænebaserede søgning som fetchNews(), men cachet i 24 timer via
 // Next.js' fetch-cache, så Google News kun rammes én gang om dagen for
-// forsidepanelet, uanset hvor mange besøgende der er. Denne cache må IKKE
-// bruges i selve cron-jobbet (fetchNews) — det skal altid have friske data.
+// forsidepanelet. Denne cache må IKKE bruges i cron-jobbet (fetchNews) —
+// det skal altid have friske data.
 async function fetchCachedNews(keyword: string): Promise<FoundItem[]> {
+  const query = `${keyword} ${SITE_CLAUSE}`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-    keyword
+    query
   )}&hl=da&gl=DK&ceid=DK:da`;
 
   const res = await fetch(url, { next: { revalidate: 86400 } });
@@ -199,15 +168,8 @@ async function fetchCachedNews(keyword: string): Promise<FoundItem[]> {
   return parseGoogleNewsRss(xml, 10);
 }
 
-// Søgeord målrettet det, panelet faktisk skal handle om: kendisser, reality,
-// fodbold og underholdning — IKKE Google News' generelle forside, som viser
-// almindelige hårde nyheder (politik, ulykker, erhverv).
-//
-// NB: Vi bruger IKKE Google News' beskrivelsesfelt til et resumé længere.
-// For forsidens tidligere "top stories"-feed viste det sig at indeholde en
-// hel klynge af relaterede artikler fra flere medier som rå HTML, ikke et
-// rent uddrag — det gav synligt, ustrippet markup på siden. Panelet viser nu
-// kun overskrift, kilde og link, som er den del af data, vi kan stole på.
+// Søgeord målrettet det, panelet skal handle om: kendisser, reality, fodbold
+// og underholdning.
 const GOSSIP_QUERIES = ["kendis", "reality", "fodbold Superligaen", "underholdning"];
 
 function stripSourceSuffix(title: string, source: string): string {
@@ -216,9 +178,7 @@ function stripSourceSuffix(title: string, source: string): string {
 }
 
 export async function fetchTopDanishStories(maxCount = 3): Promise<TopStory[]> {
-  const settled = await Promise.allSettled(
-    GOSSIP_QUERIES.map((q) => fetchCachedNews(q))
-  );
+  const settled = await Promise.allSettled(GOSSIP_QUERIES.map((q) => fetchCachedNews(q)));
 
   const seenUrls = new Set<string>();
   const seenSources = new Set<string>();
@@ -232,10 +192,7 @@ export async function fetchTopDanishStories(maxCount = 3): Promise<TopStory[]> {
       if (seenSources.has(item.source)) continue; // spred på tværs af kilder
       seenUrls.add(item.url);
       seenSources.add(item.source);
-      stories.push({
-        ...item,
-        title: stripSourceSuffix(item.title, item.source),
-      });
+      stories.push({ ...item, title: stripSourceSuffix(item.title, item.source) });
     }
   }
 
