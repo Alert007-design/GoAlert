@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
+import { welcomeEmail, goodbyeEmail } from "../../_lib/email-templates";
+import { sendViaResend } from "../../_lib/resend";
+
+// NB: importstierne herover antager, at denne fil ligger i app/api/webhooks/stripe/.
+// Tilpas "../../_lib/..." hvis jeres faktiske mappestruktur er en anden.
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET as string;
@@ -16,53 +21,6 @@ async function findCustomerRecord(
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const data = await res.json();
   return data.records?.[0];
-}
-
-async function sendEmail(to: string, subject: string, html: string) {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM;
-  if (!apiKey || !from) {
-    console.error("Resend er ikke konfigureret (mangler env-variabler).");
-    return;
-  }
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ from, to, subject, html }),
-    });
-    if (!res.ok) {
-      console.error("Resend-fejl (webhook-mail):", res.status, await res.text());
-    }
-  } catch (err) {
-    console.error("Kunne ikke sende e-mail fra webhook:", err);
-  }
-}
-
-function welcomeEmailHtml() {
-  return `
-    <div style="font-family: sans-serif; line-height: 1.6; color: #111;">
-      <h2>Velkommen til Gossip Alert!</h2>
-      <p>Hej,</p>
-      <p>Tak fordi du er blevet kunde hos Gossip Alert. Vi glæder os til samarbejdet og håber, du bliver glad for din daglige overvågning.</p>
-      <p>Fra nu af holder vi øje med nettet for dig, og du hører fra os, så snart der sker noget relevant.</p>
-      <p>Mange hilsner,<br>Gossip Alert-teamet</p>
-    </div>
-  `;
-}
-
-function goodbyeEmailHtml() {
-  return `
-    <div style="font-family: sans-serif; line-height: 1.6; color: #111;">
-      <h2>Tak for samarbejdet</h2>
-      <p>Hej,</p>
-      <p>Dit abonnement hos Gossip Alert er nu opsagt. Tak for den tid vi har haft sammen — vi håber du er velkommen tilbage, hvis du på et tidspunkt får brug for overvågning igen.</p>
-      <p>Mange hilsner,<br>Gossip Alert-teamet</p>
-    </div>
-  `;
 }
 
 export async function POST(req: NextRequest) {
@@ -155,8 +113,14 @@ export async function POST(req: NextRequest) {
             await createRes.text()
           );
         } else {
-          // Ny kunde — send velkomstmail.
-          await sendEmail(email, "Velkommen til Gossip Alert", welcomeEmailHtml());
+          // Ny kunde — send velkomstmail (fælles skabelon).
+          const mail = welcomeEmail({ recipientEmail: email, keywords });
+          await sendViaResend({
+            to: email,
+            subject: mail.subject,
+            html: mail.html,
+            text: mail.text,
+          });
         }
       }
     } catch (err) {
@@ -206,7 +170,13 @@ export async function POST(req: NextRequest) {
         } else {
           const customerEmail = existing.fields?.Email;
           if (customerEmail) {
-            await sendEmail(customerEmail, "Tak for samarbejdet", goodbyeEmailHtml());
+            const mail = goodbyeEmail({ recipientEmail: customerEmail });
+            await sendViaResend({
+              to: customerEmail,
+              subject: mail.subject,
+              html: mail.html,
+              text: mail.text,
+            });
           }
         }
       } else {
