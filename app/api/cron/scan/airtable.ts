@@ -41,7 +41,10 @@ export async function getActiveCustomers(): Promise<Customer[]> {
     "{Active}=1"
   )}`;
 
-  const res = await fetch(url, { headers: airtableHeaders() });
+  // cache: "no-store" er ikke valgfrit her. Uden det cacher Next.js svaret,
+  // og scannet kører videre på gamle kundedata — ændrede søgeord, nye
+  // tilmeldinger og opsigelser ville ikke slå igennem.
+  const res = await fetch(url, { headers: airtableHeaders(), cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Airtable Customers-fejl: ${res.status} ${await res.text()}`);
   }
@@ -55,6 +58,12 @@ export async function getActiveCustomers(): Promise<Customer[]> {
       keywords: parseKeywords(r.fields.Keywords),
     }))
     .filter((c: Customer) => c.email && c.keywords.length > 0);
+}
+
+export function logCustomers(customers: Customer[]): void {
+  for (const c of customers) {
+    console.log(`[kunde] ${c.email}: søgeord = ${c.keywords.join(" | ")}`);
+  }
 }
 
 /**
@@ -94,7 +103,9 @@ export async function getKnownUrls(customerEmail: string): Promise<Set<string>> 
     if (offset) params.set("offset", offset);
 
     const url = `${BASE_URL}/${baseId}/Mentions?${params.toString()}`;
-    const res = await fetch(url, { headers: airtableHeaders() });
+    // Samme grund som ovenfor: et cachet svar her ville få dedup'en til at
+    // arbejde på et forældet billede af, hvad vi allerede har set.
+    const res = await fetch(url, { headers: airtableHeaders(), cache: "no-store" });
     if (!res.ok) {
       throw new Error(`Airtable Mentions-fejl: ${res.status} ${await res.text()}`);
     }
