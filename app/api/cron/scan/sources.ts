@@ -1,10 +1,7 @@
-export type FoundItem = {
-  title: string;
-  url: string;
-  source: string;
-  /** ISO 8601. Kildens eget udgivelsestidspunkt — ikke hvornår vi fandt det. */
-  publishedAt: string;
-};
+import { harvestFeeds, type FeedEntry } from "./feeds";
+import type { FoundItem } from "./feeds";
+
+export type { FoundItem };
 
 /**
  * Hvor langt tilbage et fund må være for at tælle med i en alarm.
@@ -15,19 +12,6 @@ const MAX_AGE_MS = MAX_AGE_HOURS * 60 * 60 * 1000;
 
 export function cutoffDate(): Date {
   return new Date(Date.now() - MAX_AGE_MS);
-}
-
-function decodeEntities(text: string): string {
-  return text
-    .replace(/<!\[CDATA\[/g, "")
-    .replace(/\]\]>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .trim();
 }
 
 function escapeRegex(input: string): string {
@@ -43,6 +27,11 @@ const DANISH_SOURCE_NAMES = [
   "femina", "alt for damerne",
 ];
 
+/**
+ * Bevares, fordi /api/debug/news stadig bruger den. Med feed-baserede kilder
+ * er den ikke længere nødvendig i selve scanningen — vi henter kun fra
+ * danske medier, så alt der kommer ind er dansk per definition.
+ */
 export function isDanishSource(sourceName: string): boolean {
   const normalized = sourceName.toLowerCase().trim();
   if (!normalized) return false;
@@ -54,112 +43,50 @@ export function isDanishSource(sourceName: string): boolean {
   });
 }
 
-type RssParseResult = {
-  items: FoundItem[];
-  /** Antal <item> i feedet, før filtrering. */
-  total: number;
-  /** Frasorteret som ikke-dansk kilde. */
-  notDanish: number;
-  /** Frasorteret som ældre end cutoff. */
-  tooOld: number;
-  /** Frasorteret fordi datoen manglede eller ikke kunne læses. */
-  noDate: number;
-  /** Nyeste udgivelsesdato set i feedet — vores bedste diagnose-signal. */
-  newest: Date | null;
-};
-
-/**
- * Bemærk: der sættes ikke loft på, hvor mange <item> vi LÆSER — kun på hvor
- * mange vi beholder. Google News' RSS er relevanssorteret, ikke datosorteret,
- * så en frisk artikel kan sagtens ligge langt nede i feedet bag måneder
- * gammelt arkivstof. Læste vi kun de første 25, ville vi tabe den.
- *
- * @param cutoff Sæt til null for ikke at datofiltrere (bruges til forsidens feed).
- */
-function parseGoogleNewsRss(
-  xml: string,
-  maxItems: number,
-  cutoff: Date | null
-): RssParseResult {
-  const items: FoundItem[] = [];
-  const itemBlocks = xml.split("<item>").slice(1);
-  let notDanish = 0;
-  let tooOld = 0;
-  let noDate = 0;
-  let newest: Date | null = null;
-
-  for (const block of itemBlocks) {
-    const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
-    const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
-    const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
-    const dateMatch = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
-    if (!titleMatch || !linkMatch) continue;
-
-    const published = dateMatch ? new Date(decodeEntities(dateMatch[1])) : null;
-    const hasDate = !!published && !Number.isNaN(published.getTime());
-
-    // Nyeste dato registreres på tværs af ALLE items, også dem vi kasserer.
-    // Er den nyeste artikel i feedet fra marts, ved vi at et tomt resultat
-    // skyldes, at der intet nyt findes — ikke at vi filtrerer forkert.
-    if (hasDate && (!newest || published! > newest)) {
-      newest = published!;
-    }
-
-    const sourceName = sourceMatch ? decodeEntities(sourceMatch[1]) : "Google News";
-    if (!isDanishSource(sourceName)) {
-      notDanish++;
-      continue;
-    }
-
-    if (!hasDate) {
-      noDate++;
-      continue;
-    }
-    if (cutoff && published! < cutoff) {
-      tooOld++;
-      continue;
-    }
-
-    if (items.length < maxItems) {
-      items.push({
-        title: decodeEntities(titleMatch[1]),
-        url: decodeEntities(linkMatch[1]),
-        source: sourceName,
-        publishedAt: published!.toISOString(),
-      });
-    }
-  }
-
-  return { items, total: itemBlocks.length, notDanish, tooOld, noDate, newest };
+function entryToItem(entry: FeedEntry): FoundItem {
+  return {
+    title: entry.title,
+    url: entry.url,
+    source: entry.source,
+    publishedAt: entry.published.toISOString(),
+  };
 }
 
 export async function fetchNews(keyword: string): Promise<FoundItem[]> {
   const cutoff = cutoffDate();
+  const needle = keyword.toLowerCase().trim();
+  if (!needle) return [];
 
-  // Forespørgslen holdes bevidst simpel: kun søgeordet og de danske
-  // lokaliseringsparametre. Både "when:1d" og en lang række "site:"-operatorer
-  // har vist sig at få Google til at svare med et helt tomt feed i stedet for
-  // en fejl. Dansk afgrænsning og datofiltrering sker i koden herunder, hvor
-  // vi kan se hvad der sker.
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-    keyword
-  )}&hl=da&gl=DK&ceid=DK:da`;
+  const { entries, status } = await harvestFeeds();
 
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Google News RSS svarede med status ${res.status}`);
+  const døde = status.filter((s) => !s.ok).map((s) => s.name);
+  if (døde.length === status.length) {
+    // Alle kilder nede er en reel fejl, ikke bare "ingen nyheder".
+    throw new Error(`Ingen af de ${status.length} nyhedskilder svarede`);
   }
 
-  const xml = await res.text();
-  const parsed = parseGoogleNewsRss(xml, 25, cutoff);
+  const friske = entries.filter((e) => e.published >= cutoff);
+  const træffere = friske.filter((e) => e.haystack.includes(needle));
+
+  // Samme historie kan ligge i flere DR-feeds (fx både "senestenyt" og
+  // "politik"), så vi folder på URL.
+  const setUrls = new Set<string>();
+  const items: FoundItem[] = [];
+  for (const e of træffere) {
+    if (setUrls.has(e.url)) continue;
+    setUrls.add(e.url);
+    items.push(entryToItem(e));
+  }
+
+  items.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
 
   console.log(
-    `[nyheder] "${keyword}": ${parsed.total} i feed → ${parsed.items.length} beholdt ` +
-      `(${parsed.notDanish} ikke-danske, ${parsed.tooOld} ældre end ${MAX_AGE_HOURS}t, ${parsed.noDate} uden dato). ` +
-      `Nyeste i feed: ${parsed.newest ? parsed.newest.toISOString() : "ingen"}`
+    `[nyheder] "${keyword}": ${entries.length} indlæg fra feeds → ` +
+      `${friske.length} inden for ${MAX_AGE_HOURS}t → ${items.length} med søgeordet` +
+      (døde.length ? ` (kilder uden svar: ${døde.join(", ")})` : "")
   );
 
-  return parsed.items;
+  return items.slice(0, 25);
 }
 
 let redditTokenCache: { token: string; expiresAt: number } | null = null;
@@ -188,15 +115,12 @@ async function getRedditAccessToken(): Promise<string> {
       "Content-Type": "application/x-www-form-urlencoded",
       "User-Agent": userAgent,
     },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-    }),
+    body: new URLSearchParams({ grant_type: "client_credentials" }),
     cache: "no-store",
   });
 
   if (!tokenRes.ok) {
     const text = await tokenRes.text();
-    // Nulstil cachen, så en udløbet/afvist token ikke hænger fast til næste kørsel.
     redditTokenCache = null;
     throw new Error(`Reddit token-fejl ${tokenRes.status}: ${text}`);
   }
@@ -209,11 +133,7 @@ async function getRedditAccessToken(): Promise<string> {
     throw new Error("Reddit returnerede ikke et access_token");
   }
 
-  redditTokenCache = {
-    token: accessToken,
-    expiresAt: now + expiresIn * 1000,
-  };
-
+  redditTokenCache = { token: accessToken, expiresAt: now + expiresIn * 1000 };
   return accessToken;
 }
 
@@ -226,16 +146,10 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
   const url =
     `https://oauth.reddit.com/search` +
     `?q=${encodeURIComponent(keyword)}` +
-    `&sort=new` +
-    `&t=day` +
-    `&limit=25` +
-    `&type=link`;
+    `&sort=new&t=day&limit=25&type=link`;
 
   const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "User-Agent": userAgent,
-    },
+    headers: { Authorization: `Bearer ${token}`, "User-Agent": userAgent },
     cache: "no-store",
   });
 
@@ -276,17 +190,15 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
 
 /**
  * Timer luft på OData-filteret. Folketingets datoer er angivet i dansk lokaltid
- * uden tidszone, mens serveren kører i UTC — uden lidt luft kan vi tabe fund,
- * der lige er landet.
+ * uden tidszone, mens serveren kører i UTC.
  */
 const FT_GRACE_MS = 3 * 60 * 60 * 1000;
 
 export async function fetchFolketinget(keyword: string): Promise<FoundItem[]> {
   const escapedKeyword = keyword.replace(/'/g, "''");
 
-  // Vi bruger Dokument frem for Sag. Sag har kun "opdateringsdato", som ændrer sig,
-  // hver gang Folketinget rører en gammel række — det er derfor betænkninger og
-  // §20-spørgsmål fra 2015 dukkede op som "nye". Dokument har en rigtig "dato".
+  // Dokument frem for Sag: Sag har kun "opdateringsdato", som ændrer sig hver
+  // gang Folketinget rører en gammel række. Dokument har en rigtig "dato".
   const cutoff = new Date(cutoffDate().getTime() - FT_GRACE_MS);
   const cutoffLiteral = cutoff.toISOString().slice(0, 19);
 
@@ -312,9 +224,7 @@ export async function fetchFolketinget(keyword: string): Promise<FoundItem[]> {
         title: String(doc.titel),
         url: `https://www.ft.dk/da/search?as=1&q=${encodeURIComponent(String(doc.titel))}`,
         source: "Folketinget (åbne data)",
-        publishedAt: Number.isNaN(published.getTime())
-          ? ""
-          : published.toISOString(),
+        publishedAt: Number.isNaN(published.getTime()) ? "" : published.toISOString(),
       };
     })
     .filter((item) => item.publishedAt !== "");
@@ -328,59 +238,41 @@ export async function fetchFolketinget(keyword: string): Promise<FoundItem[]> {
 
 export type TopStory = FoundItem;
 
-const GOSSIP_TOPIC_WORDS = ["kendis", "reality", "underholdning", "royale"];
+const GOSSIP_WORDS = [
+  "kendis", "reality", "royale", "kongehus", "kronprins", "dronning",
+  "skilsmisse", "forlovet", "stjerne", "sangerinde", "skuespiller",
+];
 const GOSSIP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 
-async function fetchGossipFeed(): Promise<FoundItem[]> {
-  // Samme princip som fetchNews: ingen "when:"-operator og ingen "site:"-liste.
-  const query = GOSSIP_TOPIC_WORDS.join(" OR ");
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-    query
-  )}&hl=da&gl=DK&ceid=DK:da`;
-
-  const res = await fetch(url, { next: { revalidate: 3600 } });
-  if (!res.ok) {
-    throw new Error(`Google News RSS svarede med status ${res.status}`);
-  }
-
-  const xml = await res.text();
-  const cutoff = new Date(Date.now() - GOSSIP_MAX_AGE_MS);
-  const parsed = parseGoogleNewsRss(xml, 20, cutoff);
-
-  console.log(
-    `[forside] ${parsed.total} i feed → ${parsed.items.length} historier ` +
-      `(nyeste: ${parsed.newest ? parsed.newest.toISOString() : "ingen"})`
-  );
-
-  return parsed.items;
-}
-
-function stripSourceSuffix(title: string, source: string): string {
-  const re = new RegExp(`\\s*-\\s*${escapeRegex(source)}$`, "i");
-  return title.replace(re, "").trim();
-}
-
 export async function fetchTopDanishStories(maxCount = 3): Promise<TopStory[]> {
-  let items: FoundItem[] = [];
+  let harvest;
   try {
-    items = await fetchGossipFeed();
+    harvest = await harvestFeeds();
   } catch (err) {
-    console.error("Kunne ikke hente sladder-feed til forsiden:", err);
+    console.error("Kunne ikke hente feeds til forsiden:", err);
     return [];
   }
+
+  const cutoff = new Date(Date.now() - GOSSIP_MAX_AGE_MS);
+  const kandidater = harvest.entries
+    .filter((e) => e.published >= cutoff)
+    .filter((e) => GOSSIP_WORDS.some((w) => e.haystack.includes(w)))
+    .sort((a, b) => b.published.getTime() - a.published.getTime());
 
   const seenUrls = new Set<string>();
   const seenSources = new Set<string>();
   const stories: TopStory[] = [];
 
-  for (const item of items) {
+  for (const entry of kandidater) {
     if (stories.length >= maxCount) break;
-    if (seenUrls.has(item.url)) continue;
-    if (seenSources.has(item.source)) continue;
-    seenUrls.add(item.url);
-    seenSources.add(item.source);
-    stories.push({ ...item, title: stripSourceSuffix(item.title, item.source) });
+    if (seenUrls.has(entry.url)) continue;
+    if (seenSources.has(entry.source)) continue;
+    seenUrls.add(entry.url);
+    seenSources.add(entry.source);
+    stories.push(entryToItem(entry));
   }
+
+  console.log(`[forside] ${kandidater.length} kandidater → ${stories.length} historier`);
 
   return stories;
 }
