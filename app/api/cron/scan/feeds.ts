@@ -41,30 +41,55 @@ export const FEEDS: Feed[] = [
   { name: "Politiken", url: "https://politiken.dk/rss/senestenyt.rss", verified: false },
   { name: "Information", url: "https://www.information.dk/feed", verified: false },
   { name: "Ekstra Bladet", url: "https://ekstrabladet.dk/rssfeed/all/", verified: false },
+  // TV 2 svarede "fetch failed" (ingen HTTP-status), hvilket typisk betyder at
+  // værten afviser forbindelsen eller ikke kan slås op fra Vercel. Adressen kan
+  // være rigtig alligevel. Jyllands-Posten og Kristeligt Dagblad er taget ud,
+  // indtil deres rigtige feed-adresser er fundet.
   { name: "TV 2", url: "https://services.tv2.dk/api/feeds/nyheder/rss", verified: false },
   { name: "Berlingske", url: "https://www.berlingske.dk/content/rss", verified: false },
-  { name: "Jyllands-Posten", url: "https://jyllands-posten.dk/latest/?service=rssfeed", verified: false },
   { name: "Altinget", url: "https://www.altinget.dk/rss", verified: false },
-  { name: "Kristeligt Dagblad", url: "https://www.kristeligt-dagblad.dk/rss.xml", verified: false },
-  { name: "Version2", url: "https://www.version2.dk/feed", verified: false },
-  { name: "Ingeniøren", url: "https://ing.dk/feed", verified: false },
   { name: "B.T.", url: "https://www.bt.dk/bt/seneste/rss", verified: false },
   { name: "Børsen", url: "https://borsen.dk/rss", verified: false },
 ];
 
 const FEED_TIMEOUT_MS = 8000;
 
+function fromCodePoint(code: number): string {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return "";
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Danske feeds koder æ, ø, å og typografiske anførselstegn som numeriske
+ * HTML-referencer (&#248; = ø). Uden at oversætte dem ville titlerne stå
+ * med kodestumper i mails — og et søgeord med æ/ø/å kunne aldrig matche.
+ * Numeriske koder oversættes først, og &amp; til sidst, så &amp;#248;
+ * ikke bliver oversat to gange.
+ */
 export function decodeEntities(text: string): string {
   return text
     .replace(/<!\[CDATA\[/g, "")
     .replace(/\]\]>/g, "")
-    .replace(/&amp;/g, "&")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => fromCodePoint(parseInt(dec, 10)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#8217;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&laquo;/g, "\u00ab")
+    .replace(/&raquo;/g, "\u00bb")
+    .replace(/&oslash;/g, "\u00f8")
+    .replace(/&Oslash;/g, "\u00d8")
+    .replace(/&aelig;/g, "\u00e6")
+    .replace(/&AElig;/g, "\u00c6")
+    .replace(/&aring;/g, "\u00e5")
+    .replace(/&Aring;/g, "\u00c5")
     .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
     .trim();
 }
 
