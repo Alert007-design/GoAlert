@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getActiveCustomers, getKnownUrls, saveMention } from "./airtable";
+import { getActiveCustomers, getKnownUrls, saveMention, logCustomers } from "./airtable";
 import { fetchNews, fetchReddit, fetchFolketinget, FoundItem } from "./sources";
 import { sendAlertEmail, sendNoResultsEmail } from "./email";
 
@@ -22,6 +22,11 @@ export async function GET(req: NextRequest) {
     console.error("Kunne ikke hente aktive kunder:", err);
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
   }
+
+  // Skriv de faktisk indlæste søgeord i loggen. Da Next.js cachede
+  // Airtable-svaret, søgte scannet på gamle søgeord uden at det kunne ses
+  // nogen steder — den slags skal aldrig kunne skjule sig igen.
+  logCustomers(customers);
 
   const results: Record<
     string,
