@@ -22,11 +22,13 @@ import type { FoundItem } from "../cron/scan/sources";
 // Tilpas stien, hvis jeres faktiske mappestruktur er en anden.
 
 // FoundItem udvides lokalt med felter, som resultat-kortet gerne vil vise,
-// men som det nuværende scan-system (sources.ts) ikke leverer endnu:
-// publiceringsdato, resumé, kildetype og billede. Skabelonen viser dem, hvis
-// de findes, og springer dem elegant over, hvis ikke.
+// men som scan-systemet endnu ikke leverer: resumé, kildetype og billede.
+// Skabelonen viser dem, hvis de findes, og springer dem elegant over, hvis ikke.
+//
+// publishedAt er IKKE længere valgfri her — den arves som påkrævet fra
+// FoundItem, fordi alle kilder nu skal levere et rigtigt udgivelsestidspunkt.
+// Gøres den valgfri igen, afviser TypeScript arven.
 export interface EnrichedFoundItem extends FoundItem {
-  publishedAt?: string;
   excerpt?: string;
   type?: string; // fx "Nyhed", "Myndighedsdokument", "Video", "Podcast", "Debatindlæg"
   imageUrl?: string;
@@ -69,15 +71,31 @@ function highlightKeyword(escapedText: string, keyword: string): string {
   }
 }
 
+/**
+ * Dato OG klokkeslæt i dansk tid.
+ *
+ * Med et 24-timers vindue er klokkeslættet ikke pynt: det er sådan, du kan se,
+ * om en omtale er fra i morges eller fra i går aftes. Tidszonen låses til
+ * Europe/Copenhagen, fordi serveren kører i UTC.
+ */
 function formatDate(dateStr?: string): string | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("da-DK", {
+
+  const datePart = d.toLocaleDateString("da-DK", {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/Copenhagen",
   });
+  const timePart = d.toLocaleTimeString("da-DK", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Copenhagen",
+  });
+
+  return `${datePart} kl. ${timePart}`;
 }
 
 function pluralize(count: number, singular: string, plural: string): string {
@@ -164,8 +182,13 @@ function renderResultCard(item: EnrichedFoundItem, keyword: string): string {
   const excerptEscaped = item.excerpt
     ? highlightKeyword(escapeHtml(item.excerpt), keyword)
     : null;
+  // URL'er escapes, så et anførselstegn i en kilde-URL ikke kan bryde ud af
+  // href-attributten og ødelægge resten af mailen.
+  const hrefEscaped = escapeHtml(item.url);
   const thumbHtml = item.imageUrl
-    ? `<img src="${item.imageUrl}" alt="" width="72" height="72" style="display:block; border-radius:6px; object-fit:cover; background:#1b2338;" />`
+    ? `<img src="${escapeHtml(
+        item.imageUrl
+      )}" alt="" width="72" height="72" style="display:block; border-radius:6px; object-fit:cover; background:#1b2338;" />`
     : "";
 
   return `
@@ -190,14 +213,14 @@ function renderResultCard(item: EnrichedFoundItem, keyword: string): string {
               }
               ${typeBadgeHtml(item.type)}
             </div>
-            <a href="${item.url}" style="color:#edeae2; text-decoration:none; font-size:15px; font-weight:600; line-height:1.4;">${titleEscaped}</a>
+            <a href="${hrefEscaped}" style="color:#edeae2; text-decoration:none; font-size:15px; font-weight:600; line-height:1.4;">${titleEscaped}</a>
             ${
               excerptEscaped
                 ? `<p style="margin:6px 0 0; color:#c7c3b8; font-size:13px; line-height:1.5;">${excerptEscaped}</p>`
                 : ""
             }
             <div style="margin-top:10px;">
-              <a href="${item.url}" style="display:inline-block; font-family:${FONT_MONO}; font-size:12px; color:#0a0f1c; background:#f2a93b; padding:7px 14px; border-radius:3px; text-decoration:none;">Læs historien</a>
+              <a href="${hrefEscaped}" style="display:inline-block; font-family:${FONT_MONO}; font-size:12px; color:#0a0f1c; background:#f2a93b; padding:7px 14px; border-radius:3px; text-decoration:none;">Læs historien</a>
             </div>
           </td>
         </tr>
@@ -267,7 +290,7 @@ export function alertWithResultsEmail(opts: {
       ${headerTitle}
     </h1>
     <p style="color:#c7c3b8; font-size:14px; line-height:1.6; margin:0 0 20px;">
-      ${greeting} Gossip Alert har fundet ${countLabel.toLowerCase()}, der matcher ${
+      ${greeting} Gossip Alert har fundet ${countLabel.toLowerCase()} det seneste døgn, der matcher ${
     isSingleKeyword ? "dit søgeord" : "dine søgeord"
   }. Se dem herunder.
     </p>
@@ -280,14 +303,14 @@ export function alertWithResultsEmail(opts: {
   const text = [
     isSingleKeyword ? `${countLabel} af "${activeKeywords[0]}"` : `${countLabel} fundet`,
     "",
-    `${greeting} Gossip Alert har fundet følgende:`,
+    `${greeting} Gossip Alert har fundet følgende det seneste døgn:`,
     "",
     ...activeKeywords.flatMap((keyword) => [
       `"${keyword}":`,
       ...(itemsByKeyword[keyword] || []).map(
         (i) =>
           `- ${i.title} (${i.source})${
-            i.publishedAt ? `, ${formatDate(i.publishedAt)}` : ""
+            formatDate(i.publishedAt) ? `, ${formatDate(i.publishedAt)}` : ""
           }\n  ${i.url}`
       ),
       "",
@@ -300,8 +323,8 @@ export function alertWithResultsEmail(opts: {
     : `Gossip Alert: ${countLabel} fundet`;
 
   const preheader = isSingleKeyword
-    ? `${countLabel} af "${activeKeywords[0]}" fundet — se dem her.`
-    : `${countLabel} fundet på tværs af dine søgeord — se dem her.`;
+    ? `${countLabel} af "${activeKeywords[0]}" det seneste døgn — se dem her.`
+    : `${countLabel} det seneste døgn på tværs af dine søgeord — se dem her.`;
 
   return {
     subject,
@@ -349,7 +372,7 @@ export function alertNoResultsEmail(opts: {
     isSingle
       ? `&quot;${keywordListEscaped}&quot;`
       : `dine søgeord (&quot;${keywordListEscaped}&quot;)`
-  } — der er ikke fundet nye relevante omtaler i denne omgang.
+  } — der er ikke fundet nye omtaler inden for det seneste døgn.
     </p>
     <p style="color:#8a93a6; font-size:13px; line-height:1.6; margin:0 0 8px;">
       Det er gode nyheder, og der er ikke noget, du behøver at gøre.
@@ -368,7 +391,7 @@ export function alertNoResultsEmail(opts: {
     "",
     `${greeting} Gossip Alert har gennemført dagens overvågning af ${
       isSingle ? `"${keywords[0]}"` : `dine søgeord (${keywords.join(", ")})`
-    } — ingen nye relevante omtaler fundet.`,
+    } — ingen nye omtaler inden for det seneste døgn.`,
     sourceIssues && sourceIssues.length > 0
       ? `Bemærk: ${sourceIssues.join(
           ", "
