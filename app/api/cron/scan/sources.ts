@@ -2,17 +2,31 @@ export type FoundItem = {
   title: string;
   url: string;
   source: string;
+  /** ISO 8601. Kildens eget udgivelsestidspunkt — ikke hvornår vi fandt det. */
+  publishedAt: string;
 };
+
+/**
+ * Hvor langt tilbage et fund må være for at tælle med i en alarm.
+ * Kan justeres med miljøvariablen SCAN_MAX_AGE_HOURS uden kodeændring.
+ */
+const MAX_AGE_HOURS = Number(process.env.SCAN_MAX_AGE_HOURS || 24);
+const MAX_AGE_MS = MAX_AGE_HOURS * 60 * 60 * 1000;
+
+export function cutoffDate(): Date {
+  return new Date(Date.now() - MAX_AGE_MS);
+}
 
 function decodeEntities(text: string): string {
   return text
+    .replace(/<!\[CDATA\[/g, "")
+    .replace(/\]\]>/g, "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
-    .replace(/<!\\[CDATA\\[/g, "")     .replace(/\\]\]>/g, "")
     .trim();
 }
 
@@ -65,28 +79,70 @@ export function isDanishSource(sourceName: string): boolean {
   });
 }
 
-function parseGoogleNewsRss(xml: string, maxItems: number): FoundItem[] {
+type RssParseResult = {
+  items: FoundItem[];
+  /** Antal <item> i feedet, før dansk-filter og datofilter. */
+  total: number;
+  /** Antal frasorteret fordi de var ældre end cutoff. */
+  tooOld: number;
+  /** Antal frasorteret fordi de manglede en brugbar dato. */
+  noDate: number;
+};
+
+/**
+ * @param cutoff Sæt til null for ikke at datofiltrere (bruges til forsidens feed).
+ */
+function parseGoogleNewsRss(
+  xml: string,
+  maxItems: number,
+  cutoff: Date | null
+): RssParseResult {
   const items: FoundItem[] = [];
   const itemBlocks = xml.split("<item>").slice(1);
-  for (const block of itemBlocks.slice(0, maxItems)) {
+  let tooOld = 0;
+  let noDate = 0;
+
+  for (const block of itemBlocks) {
+    if (items.length >= maxItems) break;
+
     const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
     const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
     const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
-    if (titleMatch && linkMatch) {
-      const sourceName = sourceMatch ? decodeEntities(sourceMatch[1]) : "Google News";
-      if (!isDanishSource(sourceName)) continue;
-      items.push({
-        title: decodeEntities(titleMatch[1]),
-        url: decodeEntities(linkMatch[1]),
-        source: sourceName,
-      });
+    const dateMatch = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
+    if (!titleMatch || !linkMatch) continue;
+
+    const sourceName = sourceMatch ? decodeEntities(sourceMatch[1]) : "Google News";
+    if (!isDanishSource(sourceName)) continue;
+
+    // Uden en brugbar dato kan vi ikke afgøre, om fundet er nyt. Så ryger det ud.
+    const published = dateMatch ? new Date(decodeEntities(dateMatch[1])) : null;
+    if (!published || Number.isNaN(published.getTime())) {
+      noDate++;
+      continue;
     }
+    if (cutoff && published < cutoff) {
+      tooOld++;
+      continue;
+    }
+
+    items.push({
+      title: decodeEntities(titleMatch[1]),
+      url: decodeEntities(linkMatch[1]),
+      source: sourceName,
+      publishedAt: published.toISOString(),
+    });
   }
-  return items;
+
+  return { items, total: itemBlocks.length, tooOld, noDate };
 }
 
 export async function fetchNews(keyword: string): Promise<FoundItem[]> {
-  const query = `${keyword} ${SITE_CLAUSE}`;
+  const cutoff = cutoffDate();
+
+  // "when:1d" beder Google om kun at levere det seneste døgn. Det gør feedet
+  // reelt datosorteret i stedet for relevanssorteret — uden det returnerer
+  // Google de samme arkivartikler dag efter dag.
+  const query = `${keyword} when:1d ${SITE_CLAUSE}`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
     query
   )}&hl=da&gl=DK&ceid=DK:da`;
@@ -97,7 +153,14 @@ export async function fetchNews(keyword: string): Promise<FoundItem[]> {
   }
 
   const xml = await res.text();
-  return parseGoogleNewsRss(xml, 10);
+  const parsed = parseGoogleNewsRss(xml, 25, cutoff);
+
+  console.log(
+    `[nyheder] "${keyword}": ${parsed.total} i feed → ${parsed.items.length} inden for ${MAX_AGE_HOURS}t ` +
+      `(${parsed.tooOld} for gamle, ${parsed.noDate} uden dato)`
+  );
+
+  return parsed.items;
 }
 
 let redditTokenCache: { token: string; expiresAt: number } | null = null;
@@ -134,6 +197,8 @@ async function getRedditAccessToken(): Promise<string> {
 
   if (!tokenRes.ok) {
     const text = await tokenRes.text();
+    // Nulstil cachen, så en udløbet/afvist token ikke hænger fast til næste kørsel.
+    redditTokenCache = null;
     throw new Error(`Reddit token-fejl ${tokenRes.status}: ${text}`);
   }
 
@@ -154,6 +219,7 @@ async function getRedditAccessToken(): Promise<string> {
 }
 
 export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
+  const cutoff = cutoffDate();
   const token = await getRedditAccessToken();
   const userAgent =
     process.env.REDDIT_USER_AGENT || "server:gossip-alert:v1.0 (by /u/yourusername)";
@@ -162,7 +228,8 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
     `https://oauth.reddit.com/search` +
     `?q=${encodeURIComponent(keyword)}` +
     `&sort=new` +
-    `&limit=10` +
+    `&t=day` +
+    `&limit=25` +
     `&type=link`;
 
   const res = await fetch(url, {
@@ -181,22 +248,53 @@ export async function fetchReddit(keyword: string): Promise<FoundItem[]> {
   const data = await res.json();
   const children = data?.data?.children || [];
 
-  return children
+  const items: FoundItem[] = children
     .map((c: any) => c?.data)
     .filter(Boolean)
     .filter((item: any) => item.permalink && (item.title || item.selftext))
-    .map((item: any) => ({
-      title: (item.title || item.selftext || "(uden titel)").trim(),
-      url: `https://www.reddit.com${item.permalink}`,
-      source: `Reddit (r/${item.subreddit})`,
-    }));
+    .map((item: any) => {
+      // created_utc er sekunder siden epoch, ikke millisekunder.
+      const seconds = Number(item.created_utc);
+      const published = Number.isFinite(seconds) ? new Date(seconds * 1000) : null;
+      return {
+        title: (item.title || item.selftext || "(uden titel)").trim(),
+        url: `https://www.reddit.com${item.permalink}`,
+        source: `Reddit (r/${item.subreddit})`,
+        publishedAt: published ? published.toISOString() : "",
+      };
+    })
+    .filter((item: FoundItem) => {
+      if (!item.publishedAt) return false;
+      return new Date(item.publishedAt) >= cutoff;
+    });
+
+  console.log(
+    `[reddit] "${keyword}": ${children.length} i svar → ${items.length} inden for ${MAX_AGE_HOURS}t`
+  );
+
+  return items;
 }
+
+/**
+ * Timer luft på OData-filteret. Folketingets datoer er angivet i dansk lokaltid
+ * uden tidszone, mens serveren kører i UTC — uden lidt luft kan vi tabe fund,
+ * der lige er landet.
+ */
+const FT_GRACE_MS = 3 * 60 * 60 * 1000;
 
 export async function fetchFolketinget(keyword: string): Promise<FoundItem[]> {
   const escapedKeyword = keyword.replace(/'/g, "''");
-  const filter = `substringof('${escapedKeyword}',titel)`;
+
+  // Vi bruger Dokument frem for Sag. Sag har kun "opdateringsdato", som ændrer sig,
+  // hver gang Folketinget rører en gammel række — det er derfor betænkninger og
+  // §20-spørgsmål fra 2015 dukkede op som "nye". Dokument har en rigtig "dato".
+  const cutoff = new Date(cutoffDate().getTime() - FT_GRACE_MS);
+  const cutoffLiteral = cutoff.toISOString().slice(0, 19);
+
+  const filter =
+    `substringof('${escapedKeyword}',titel) and dato gt datetime'${cutoffLiteral}'`;
   const url =
-    `https://oda.ft.dk/api/Sag?$format=json&$top=10&$orderby=opdateringsdato desc` +
+    `https://oda.ft.dk/api/Dokument?$format=json&$top=20&$orderby=dato desc` +
     `&$filter=${encodeURIComponent(filter)}`;
 
   const res = await fetch(url, { cache: "no-store" });
@@ -207,13 +305,26 @@ export async function fetchFolketinget(keyword: string): Promise<FoundItem[]> {
   const data = await res.json();
   const rows: any[] = data.value || [];
 
-  return rows
-    .filter((sag) => sag.titel)
-    .map((sag) => ({
-      title: sag.titel as string,
-      url: `https://www.ft.dk/da/search?as=1&q=${encodeURIComponent(sag.titel)}`,
-      source: "Folketinget (åbne data)",
-    }));
+  const items: FoundItem[] = rows
+    .filter((doc) => doc.titel && doc.dato)
+    .map((doc) => {
+      const published = new Date(doc.dato);
+      return {
+        title: String(doc.titel),
+        url: `https://www.ft.dk/da/search?as=1&q=${encodeURIComponent(String(doc.titel))}`,
+        source: "Folketinget (åbne data)",
+        publishedAt: Number.isNaN(published.getTime())
+          ? ""
+          : published.toISOString(),
+      };
+    })
+    .filter((item) => item.publishedAt !== "");
+
+  console.log(
+    `[folketinget] "${keyword}": ${rows.length} dokumenter siden ${cutoffLiteral} → ${items.length} brugbare`
+  );
+
+  return items;
 }
 
 export type TopStory = FoundItem;
@@ -235,7 +346,8 @@ async function fetchGossipFeed(): Promise<FoundItem[]> {
   }
 
   const xml = await res.text();
-  return parseGoogleNewsRss(xml, 20);
+  // Forsidens feed er ikke en alarm — her gælder 24-timers reglen ikke.
+  return parseGoogleNewsRss(xml, 20, null).items;
 }
 
 function stripSourceSuffix(title: string, source: string): string {
