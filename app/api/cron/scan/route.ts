@@ -25,13 +25,14 @@ export async function GET(req: NextRequest) {
 
   const results: Record<
     string,
-    { newItems: number; sourceIssues: string[]; error?: string }
+    { found: number; newItems: number; sourceIssues: string[]; error?: string }
   > = {};
 
   // Hver kunde behandles isoleret: én kundes fejl stopper ikke resten af kørslen.
   for (const customer of customers) {
     const sourceIssues = new Set<string>();
     const newItemsByKeyword: Record<string, FoundItem[]> = {};
+    let totalFound = 0;
 
     try {
       const knownUrls = await getKnownUrls(customer.email);
@@ -77,7 +78,15 @@ export async function GET(req: NextRequest) {
           sourceIssues.add("Folketinget");
         }
 
+        totalFound += items.length;
+
         const freshItems = items.filter((item) => !knownUrls.has(item.url));
+
+        // Gør forskellen på "intet udgivet" og "alt kendt i forvejen" synlig i loggen.
+        console.log(
+          `[scan] ${customer.email} "${keyword}": ${items.length} fund inden for tidsvinduet ` +
+            `→ ${freshItems.length} nye efter dedup`
+        );
 
         if (freshItems.length > 0) {
           newItemsByKeyword[keyword] = freshItems;
@@ -117,12 +126,14 @@ export async function GET(req: NextRequest) {
       }
 
       results[customer.email] = {
+        found: totalFound,
         newItems: totalNew,
         sourceIssues: Array.from(sourceIssues),
       };
     } catch (err) {
       console.error(`Scan-fejl for ${customer.email}:`, err);
       results[customer.email] = {
+        found: totalFound,
         newItems: 0,
         sourceIssues: Array.from(sourceIssues),
         error: String(err),
