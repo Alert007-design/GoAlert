@@ -34,31 +34,6 @@ function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const DANISH_DOMAINS = [
-  "dr.dk",
-  "tv2.dk",
-  "politiken.dk",
-  "jyllands-posten.dk",
-  "berlingske.dk",
-  "eb.dk",
-  "bt.dk",
-  "information.dk",
-  "kristeligt-dagblad.dk",
-  "weekendavisen.dk",
-  "altinget.dk",
-  "finans.dk",
-  "borsen.dk",
-  "nordjyske.dk",
-  "jv.dk",
-  "fyens.dk",
-  "seoghoer.dk",
-  "billedbladet.dk",
-  "femina.dk",
-  "alt.dk",
-];
-
-const SITE_CLAUSE = "(" + DANISH_DOMAINS.map((d) => `site:${d}`).join(" OR ") + ")";
-
 const DANISH_SOURCE_NAMES = [
   "dr", "dr nyheder", "politiken", "jyllands-posten", "jyllandsposten", "jp",
   "berlingske", "ekstra bladet", "ekstrabladet", "b.t.", "bt", "information",
@@ -81,15 +56,24 @@ export function isDanishSource(sourceName: string): boolean {
 
 type RssParseResult = {
   items: FoundItem[];
-  /** Antal <item> i feedet, før dansk-filter og datofilter. */
+  /** Antal <item> i feedet, før filtrering. */
   total: number;
-  /** Antal frasorteret fordi de var ældre end cutoff. */
+  /** Frasorteret som ikke-dansk kilde. */
+  notDanish: number;
+  /** Frasorteret som ældre end cutoff. */
   tooOld: number;
-  /** Antal frasorteret fordi de manglede en brugbar dato. */
+  /** Frasorteret fordi datoen manglede eller ikke kunne læses. */
   noDate: number;
+  /** Nyeste udgivelsesdato set i feedet — vores bedste diagnose-signal. */
+  newest: Date | null;
 };
 
 /**
+ * Bemærk: der sættes ikke loft på, hvor mange <item> vi LÆSER — kun på hvor
+ * mange vi beholder. Google News' RSS er relevanssorteret, ikke datosorteret,
+ * så en frisk artikel kan sagtens ligge langt nede i feedet bag måneder
+ * gammelt arkivstof. Læste vi kun de første 25, ville vi tabe den.
+ *
  * @param cutoff Sæt til null for ikke at datofiltrere (bruges til forsidens feed).
  */
 function parseGoogleNewsRss(
@@ -99,52 +83,66 @@ function parseGoogleNewsRss(
 ): RssParseResult {
   const items: FoundItem[] = [];
   const itemBlocks = xml.split("<item>").slice(1);
+  let notDanish = 0;
   let tooOld = 0;
   let noDate = 0;
+  let newest: Date | null = null;
 
   for (const block of itemBlocks) {
-    if (items.length >= maxItems) break;
-
     const titleMatch = block.match(/<title>([\s\S]*?)<\/title>/);
     const linkMatch = block.match(/<link>([\s\S]*?)<\/link>/);
     const sourceMatch = block.match(/<source[^>]*>([\s\S]*?)<\/source>/);
     const dateMatch = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/);
     if (!titleMatch || !linkMatch) continue;
 
-    const sourceName = sourceMatch ? decodeEntities(sourceMatch[1]) : "Google News";
-    if (!isDanishSource(sourceName)) continue;
-
-    // Uden en brugbar dato kan vi ikke afgøre, om fundet er nyt. Så ryger det ud.
     const published = dateMatch ? new Date(decodeEntities(dateMatch[1])) : null;
-    if (!published || Number.isNaN(published.getTime())) {
+    const hasDate = !!published && !Number.isNaN(published.getTime());
+
+    // Nyeste dato registreres på tværs af ALLE items, også dem vi kasserer.
+    // Er den nyeste artikel i feedet fra marts, ved vi at et tomt resultat
+    // skyldes, at der intet nyt findes — ikke at vi filtrerer forkert.
+    if (hasDate && (!newest || published! > newest)) {
+      newest = published!;
+    }
+
+    const sourceName = sourceMatch ? decodeEntities(sourceMatch[1]) : "Google News";
+    if (!isDanishSource(sourceName)) {
+      notDanish++;
+      continue;
+    }
+
+    if (!hasDate) {
       noDate++;
       continue;
     }
-    if (cutoff && published < cutoff) {
+    if (cutoff && published! < cutoff) {
       tooOld++;
       continue;
     }
 
-    items.push({
-      title: decodeEntities(titleMatch[1]),
-      url: decodeEntities(linkMatch[1]),
-      source: sourceName,
-      publishedAt: published.toISOString(),
-    });
+    if (items.length < maxItems) {
+      items.push({
+        title: decodeEntities(titleMatch[1]),
+        url: decodeEntities(linkMatch[1]),
+        source: sourceName,
+        publishedAt: published!.toISOString(),
+      });
+    }
   }
 
-  return { items, total: itemBlocks.length, tooOld, noDate };
+  return { items, total: itemBlocks.length, notDanish, tooOld, noDate, newest };
 }
 
 export async function fetchNews(keyword: string): Promise<FoundItem[]> {
   const cutoff = cutoffDate();
 
-  // "when:1d" beder Google om kun at levere det seneste døgn. Det gør feedet
-  // reelt datosorteret i stedet for relevanssorteret — uden det returnerer
-  // Google de samme arkivartikler dag efter dag.
-  const query = `${keyword} when:1d ${SITE_CLAUSE}`;
+  // Forespørgslen holdes bevidst simpel: kun søgeordet og de danske
+  // lokaliseringsparametre. Både "when:1d" og en lang række "site:"-operatorer
+  // har vist sig at få Google til at svare med et helt tomt feed i stedet for
+  // en fejl. Dansk afgrænsning og datofiltrering sker i koden herunder, hvor
+  // vi kan se hvad der sker.
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
-    query
+    keyword
   )}&hl=da&gl=DK&ceid=DK:da`;
 
   const res = await fetch(url, { cache: "no-store" });
@@ -156,8 +154,9 @@ export async function fetchNews(keyword: string): Promise<FoundItem[]> {
   const parsed = parseGoogleNewsRss(xml, 25, cutoff);
 
   console.log(
-    `[nyheder] "${keyword}": ${parsed.total} i feed → ${parsed.items.length} inden for ${MAX_AGE_HOURS}t ` +
-      `(${parsed.tooOld} for gamle, ${parsed.noDate} uden dato)`
+    `[nyheder] "${keyword}": ${parsed.total} i feed → ${parsed.items.length} beholdt ` +
+      `(${parsed.notDanish} ikke-danske, ${parsed.tooOld} ældre end ${MAX_AGE_HOURS}t, ${parsed.noDate} uden dato). ` +
+      `Nyeste i feed: ${parsed.newest ? parsed.newest.toISOString() : "ingen"}`
   );
 
   return parsed.items;
@@ -329,25 +328,31 @@ export async function fetchFolketinget(keyword: string): Promise<FoundItem[]> {
 
 export type TopStory = FoundItem;
 
-const GOSSIP_DOMAINS = ["seoghoer.dk", "billedbladet.dk", "eb.dk", "bt.dk"];
 const GOSSIP_TOPIC_WORDS = ["kendis", "reality", "underholdning", "royale"];
+const GOSSIP_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
 
 async function fetchGossipFeed(): Promise<FoundItem[]> {
-  const topicClause = "(" + GOSSIP_TOPIC_WORDS.join(" OR ") + ")";
-  const domainClause = "(" + GOSSIP_DOMAINS.map((d) => `site:${d}`).join(" OR ") + ")";
-  const query = `${topicClause} when:2d ${domainClause}`;
+  // Samme princip som fetchNews: ingen "when:"-operator og ingen "site:"-liste.
+  const query = GOSSIP_TOPIC_WORDS.join(" OR ");
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(
     query
   )}&hl=da&gl=DK&ceid=DK:da`;
 
-  const res = await fetch(url, { next: { revalidate: 86400 } });
+  const res = await fetch(url, { next: { revalidate: 3600 } });
   if (!res.ok) {
     throw new Error(`Google News RSS svarede med status ${res.status}`);
   }
 
   const xml = await res.text();
-  // Forsidens feed er ikke en alarm — her gælder 24-timers reglen ikke.
-  return parseGoogleNewsRss(xml, 20, null).items;
+  const cutoff = new Date(Date.now() - GOSSIP_MAX_AGE_MS);
+  const parsed = parseGoogleNewsRss(xml, 20, cutoff);
+
+  console.log(
+    `[forside] ${parsed.total} i feed → ${parsed.items.length} historier ` +
+      `(nyeste: ${parsed.newest ? parsed.newest.toISOString() : "ingen"})`
+  );
+
+  return parsed.items;
 }
 
 function stripSourceSuffix(title: string, source: string): string {
