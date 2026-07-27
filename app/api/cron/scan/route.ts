@@ -99,6 +99,7 @@ export async function GET(req: NextRequest) {
               title: item.title,
               url: item.url,
               source: item.source,
+              publishedAt: item.publishedAt,
             });
           }
         }
