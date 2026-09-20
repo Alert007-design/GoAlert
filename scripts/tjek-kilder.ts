@@ -10,6 +10,10 @@
 // Eller giv en eller flere adresser for at afprøve kandidater:
 //     npx tsx scripts/tjek-kilder.ts https://eksempel.dk/rss
 //
+// Tilføj --vis for også at se de første indlæg, som scannet ville læse dem.
+// Det er forskellen på "kilden svarede" og "kilden leverer noget brugbart":
+//     npx tsx scripts/tjek-kilder.ts --vis https://eksempel.dk/rss
+//
 // Afslutter med fejlkode, hvis en kilde ikke svarer med læsbare indlæg, så
 // det kan bruges som en kontrol og ikke bare en udskrift.
 
@@ -20,7 +24,9 @@ type Prøve = { navn: string; url: string };
 
 const TIMEOUT_MS = 20000;
 
-async function tjek(p: Prøve) {
+const VIS_ANTAL = 3;
+
+async function tjek(p: Prøve, vis: boolean) {
   const t0 = Date.now();
   try {
     const res = await fetch(p.url, {
@@ -61,12 +67,22 @@ async function tjek(p: Prøve) {
     const nyeste = tider.length ? Math.max(...tider) : null;
     const alderTimer = nyeste ? (Date.now() - nyeste) / 3_600_000 : null;
 
+    const eksempler = vis
+      ? entries.slice(0, VIS_ANTAL).map((e) => ({
+          titel: e.title,
+          url: e.url,
+          dato: e.published?.toISOString() || "(ingen)",
+          uddrag: e.summary.slice(0, 100),
+        }))
+      : [];
+
     return {
       ...p,
       ok: true,
       antal: entries.length,
       ms,
       note: alderTimer === null ? "ingen datoer" : `nyeste ${alderTimer.toFixed(1)}t siden`,
+      eksempler,
     };
   } catch (err: any) {
     return { ...p, ok: false, antal: 0, ms: Date.now() - t0, note: String(err?.message || err) };
@@ -74,7 +90,9 @@ async function tjek(p: Prøve) {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
+  const alleArgs = process.argv.slice(2);
+  const vis = alleArgs.includes("--vis");
+  const args = alleArgs.filter((a) => a !== "--vis");
 
   const prøver: Prøve[] = args.length
     ? args.map((url) => ({ navn: new URL(url).hostname, url }))
@@ -82,7 +100,7 @@ async function main() {
 
   console.log(`\nAfprøver ${prøver.length} kilde(r) med rigtige kald…\n`);
 
-  const resultater = await Promise.all(prøver.map(tjek));
+  const resultater = await Promise.all(prøver.map((p) => tjek(p, vis)));
   resultater.sort((a, b) => Number(a.ok) - Number(b.ok) || a.navn.localeCompare(b.navn));
 
   for (const r of resultater) {
@@ -90,6 +108,11 @@ async function main() {
       `${r.ok ? "OK  " : "FEJL"} | ${r.navn.padEnd(26)} | ${String(r.antal).padStart(3)} indlæg | ${String(r.ms).padStart(5)}ms | ${r.note}`
     );
     if (!r.ok) console.log(`       ${r.url}`);
+
+    for (const e of (r as any).eksempler || []) {
+      console.log(`       · ${e.dato}  ${e.titel.slice(0, 90)}`);
+      console.log(`         ${e.url}`);
+    }
   }
 
   const virker = resultater.filter((r) => r.ok).length;

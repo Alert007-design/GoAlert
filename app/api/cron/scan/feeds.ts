@@ -68,8 +68,40 @@ export function decodeEntities(text: string): string {
     .trim();
 }
 
+/**
+ * Fjerner HTML og efterlader læsbar tekst.
+ *
+ * Tags midt inde i en sætning fjernes UDEN at efterlade et mellemrum. Ellers
+ * bliver Mastodons hashtags — der skrives som `#<span>Caturday</span>` — til
+ * "# Caturday" med et mellemrum for meget. Afsnit, linjeskift og lignende
+ * bliver derimod til et mellemrum, så to sætninger ikke klistrer sammen.
+ */
+const INLINE_TAGS = /<\/?(?:span|a|strong|em|b|i|u|code|small|mark|sub|sup)(?:\s[^>]*)?>/gi;
+
 function stripTags(text: string): string {
-  return text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return text
+    .replace(INLINE_TAGS, "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Laver en overskrift ud af selve teksten.
+ *
+ * Opslag på Mastodon og Bluesky har ingen titel — det har sociale opslag
+ * sjældent. Uden det her blev hvert eneste opslag kasseret, fordi parseren
+ * krævede en <title>. I stedet bruges begyndelsen af opslaget som overskrift,
+ * klippet ved et mellemrum så et ord ikke skæres midt over.
+ */
+function kortTitel(tekst: string, maks = 120): string {
+  const rent = tekst.trim();
+  if (!rent) return "";
+  if (rent.length <= maks) return rent;
+
+  const klippet = rent.slice(0, maks);
+  const sidsteMellemrum = klippet.lastIndexOf(" ");
+  return (sidsteMellemrum > maks * 0.6 ? klippet.slice(0, sidsteMellemrum) : klippet) + "…";
 }
 
 function firstMatch(block: string, patterns: RegExp[]): string | null {
@@ -78,6 +110,20 @@ function firstMatch(block: string, patterns: RegExp[]): string | null {
     if (m && m[1]) return m[1];
   }
   return null;
+}
+
+/**
+ * Wikipedias historik-feed nævner ikke selv, hvilken artikel det handler om —
+ * men artiklens navn står i adressen (`?title=Mette_Frederiksen`). Det hentes
+ * ud her, så det kan lægges til søgefeltet.
+ */
+export function artikelnavnFraWikipediaUrl(url: string): string {
+  try {
+    const titel = new URL(url).searchParams.get("title");
+    return titel ? titel.replace(/_/g, " ") : "";
+  } catch {
+    return "";
+  }
 }
 
 /** Ét indlæg fra et feed, inden nøgleordsfiltrering. */
@@ -105,7 +151,22 @@ export type FeedEntry = {
  * Håndterer både RSS (<item>) og Atom (<entry>). Danske medier bruger
  * overvejende RSS, men et par stykker leverer Atom.
  */
-export function parseFeed(xml: string, sourceName: string, platform = "rss"): FeedEntry[] {
+export function parseFeed(
+  xml: string,
+  sourceName: string,
+  platform = "rss",
+  /**
+   * Ekstra tekst der lægges til hvert indlægs søgefelt.
+   *
+   * Bruges til Wikipedia: historik-feedet indeholder kun redigeringens
+   * kommentar og selve ændringen — ikke artiklens navn. Overvåger man sit
+   * eget navn, ville en rettelse i ens egen artikel derfor IKKE give et
+   * træf, medmindre navnet tilfældigvis stod i den ændrede tekst. Ved at
+   * lægge artiklens navn til søgefeltet bliver enhver rettelse i artiklen
+   * til en omtale, hvilket er hele formålet med at overvåge den.
+   */
+  ekstraSøgetekst = ""
+): FeedEntry[] {
   const isAtom = /<feed[\s>]/i.test(xml) && /<entry[\s>]/i.test(xml);
   const blocks = isAtom
     ? xml.split(/<entry[\s>]/i).slice(1)
@@ -114,8 +175,8 @@ export function parseFeed(xml: string, sourceName: string, platform = "rss"): Fe
   const entries: FeedEntry[] = [];
 
   for (const block of blocks) {
+    // Titlen må gerne mangle — se nedenfor. Linket og datoen må ikke.
     const rawTitle = firstMatch(block, [/<title[^>]*>([\s\S]*?)<\/title>/i]);
-    if (!rawTitle) continue;
 
     const rawLink =
       firstMatch(block, [/<link[^>]*>([\s\S]*?)<\/link>/i]) ||
@@ -138,14 +199,26 @@ export function parseFeed(xml: string, sourceName: string, platform = "rss"): Fe
     const parsedDate = parsePublishedAt(publishedRaw);
     if (!parsedDate) continue;
 
+    // Resuméet kan hedde mange ting alt efter platform. content:encoded først,
+    // fordi den indeholder hele teksten, hvor description ofte er forkortet.
+    // media:description er YouTubes videobeskrivelse.
     const rawSummary =
       firstMatch(block, [
+        /<content:encoded>([\s\S]*?)<\/content:encoded>/i,
         /<description>([\s\S]*?)<\/description>/i,
         /<summary[^>]*>([\s\S]*?)<\/summary>/i,
+        /<media:description>([\s\S]*?)<\/media:description>/i,
+        /<content[^>]*>([\s\S]*?)<\/content>/i,
       ]) || "";
 
-    const title = stripTags(decodeEntities(rawTitle));
     const summary = stripTags(decodeEntities(rawSummary));
+
+    // Har indlægget ingen titel, bruges begyndelsen af teksten. Det er
+    // normalen på Mastodon og Bluesky, hvor opslag ikke HAR overskrifter.
+    // Er der hverken titel eller tekst, er der ikke noget at vise — og så
+    // springes indlægget over.
+    const title = rawTitle ? stripTags(decodeEntities(rawTitle)) : kortTitel(summary);
+    if (!title) continue;
 
     entries.push({
       title,
@@ -155,7 +228,7 @@ export function parseFeed(xml: string, sourceName: string, platform = "rss"): Fe
       publishedRaw,
       published: parsedDate.date,
       summary,
-      haystack: `${title}\n${summary}`.toLowerCase(),
+      haystack: `${title}\n${summary}${ekstraSøgetekst ? `\n${ekstraSøgetekst}` : ""}`.toLowerCase(),
     });
   }
 
@@ -218,7 +291,9 @@ async function fetchOneFeed(kilde: Kilde): Promise<{ entries: FeedEntry[]; statu
     }
 
     const xml = await res.text();
-    const entries = parseFeed(xml, kilde.name, kilde.platform);
+    const ekstra =
+      kilde.platform === "wikipedia" ? artikelnavnFraWikipediaUrl(kilde.url) : "";
+    const entries = parseFeed(xml, kilde.name, kilde.platform, ekstra);
     const tidspunkter = entries
       .map((e) => e.published?.getTime())
       .filter((t): t is number => typeof t === "number");

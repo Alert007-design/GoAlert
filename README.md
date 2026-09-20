@@ -44,6 +44,7 @@ eksterne UI-biblioteker.
   skrive i Airtable eller sende mails
 - `scripts/tjek-kilder.ts` — afprøver kildeadresser med rigtige kald, så
   ingen adresse gættes
+- `docs/tilfoej-kilder.md` — klikvejledning til at tilføje hver slags kilde
 - `docs/reddit-ansoegning.md` — sådan søger du om Reddit-adgang
 - `docs/meta-ansoegning.md` — hvad en Facebook/Instagram-ansøgning kræver
 
@@ -193,7 +194,7 @@ loggen. En manglende hjælpetabel må aldrig kunne stoppe overvågningen.
 | Kolonne | Felttype i Airtable | Hvad den bruges til |
 | --- | --- | --- |
 | `Name` | Single line text | Kildenavnet, som det vises i mailen |
-| `Platform` | Single line text | `rss`, `youtube`, `mastodon`, `bluesky`, `wikipedia` … |
+| `Platform` | Single line text | `rss`, `youtube`, `mastodon`, `bluesky` eller `wikipedia` |
 | `Type` | Single select: `feed`, `search` | `feed` = hent alt og filtrér lokalt. `search` = spørg pr. søgeord |
 | `URL` | Single line text | Adressen eller identifikatoren |
 | `Active` | Checkbox | Kun afkrydsede kilder hentes |
@@ -227,6 +228,32 @@ Ruten kan køres igen og igen uden at lave rod:
 - En kilde, du bevidst har slået fra i Airtable, bliver ikke tilføjet igen.
 
 Kilder, du selv har tilføjet, vises under `dineEgneKilder` — de røres ikke.
+
+### Platformene
+
+Ud over almindelige nyhedsfeeds kan du tilføje YouTube-kanaler,
+Mastodon-profiler og -hashtags, Bluesky-profiler og ændringer i en bestemt
+Wikipedia-artikel. Google Alerts og podcasts er almindelige feeds og kræver
+ingen særlig opsætning.
+
+**[docs/tilfoej-kilder.md](docs/tilfoej-kilder.md)** har klikvejledningen til
+hver enkelt — inklusive hvordan du finder en YouTube-kanals id, og hvad der
+ikke understøttes.
+
+To ting er værd at vide:
+
+- **Sociale opslag har ingen overskrift.** Systemet bruger begyndelsen af
+  opslaget som titel i mailen og gennemsøger hele teksten. Uden det ville
+  hvert eneste opslag fra Mastodon og Bluesky blive kasseret.
+- **Wikipedia har en særregel.** Historik-feedet fortæller kun, hvad der blev
+  rettet — ikke i hvilken artikel. Artiklens navn hentes derfor ud af
+  adressen og lægges til det felt, der gennemsøges, så en rettelse i din egen
+  artikel faktisk giver en omtale. Det virker kun, når `Platform` er
+  `wikipedia`.
+
+Alle platforme er underlagt præcis de samme regler om 24 timer og ingen
+gentagelser. Det er ikke til forhandling pr. platform — de går alle gennem
+det samme ene sted.
 
 ### Reglen om kildeadresser
 
