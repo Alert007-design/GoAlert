@@ -53,6 +53,7 @@ function entryToRaw(entry: FeedEntry): RawItem {
     title: entry.title,
     url: entry.url,
     source: entry.source,
+    platform: entry.platform,
     publishedAt: entry.publishedRaw,
     excerpt: entry.summary || undefined,
   };
@@ -212,6 +213,7 @@ export async function fetchReddit(keyword: string): Promise<KildeResultat> {
         title: (item.title || item.selftext || "(uden titel)").trim(),
         url: `https://www.reddit.com${item.permalink}`,
         source: `Reddit (r/${item.subreddit})`,
+        platform: "reddit",
         publishedAt: published ? published.toISOString() : null,
       };
     });
@@ -275,6 +277,7 @@ export async function fetchFolketinget(
         `https://www.ft.dk/da/search?as=1&q=${encodeURIComponent(String(doc.titel))}` +
         `&dokid=${encodeURIComponent(String(doc.id))}`,
       source: "Folketinget (åbne data)",
+      platform: "folketinget",
       publishedAt: String(doc.dato),
     }));
 

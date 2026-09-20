@@ -8,12 +8,19 @@
 
 import { parsePublishedAt, toDanishLabel } from "./dates";
 
+// Den fælles datamodel. ALLE kilder — RSS, YouTube, Mastodon, Bluesky,
+// Wikipedia og hvad der siden kommer til — leverer præcis disse felter.
+// Det er dét, der gør, at en ny kilde kan tilføjes uden at røre resten af
+// systemet: mail, dedup og aldersregel kender kun denne form.
+
 /** Et fund, som det ser ud FØR aldersreglen er anvendt. */
 export type RawItem = {
   title: string;
   url: string;
   /** Vises som kildenavn, fx "DR Indland". */
   source: string;
+  /** Hvilken slags kilde: rss, youtube, mastodon, bluesky, wikipedia … */
+  platform: string;
   /** Rå datotekst fra kilden. Må gerne være null — så kasseres fundet. */
   publishedAt: string | null;
   excerpt?: string;
@@ -24,6 +31,7 @@ export type FreshItem = {
   title: string;
   url: string;
   source: string;
+  platform: string;
   /** ISO 8601 i UTC. Altid udfyldt. */
   publishedAt: string;
   excerpt?: string;
@@ -169,6 +177,7 @@ export function enforceWindow(
       title: item.title,
       url: item.url,
       source: item.source,
+      platform: item.platform,
       publishedAt: parsed.date.toISOString(),
       excerpt: item.excerpt,
     });
