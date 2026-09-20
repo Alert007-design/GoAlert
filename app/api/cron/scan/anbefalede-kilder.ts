@@ -79,4 +79,12 @@ export const AFPRØVET_UDEN_HELD: { navn: string; url: string; hvad: string }[] 
   { navn: "Nordjyske", url: "https://nordjyske.dk/rss", hvad: "svarer med en HTML-side, ikke et feed" },
   { navn: "Kforum", url: "https://www.kommunikationsforum.dk/rss", hvad: "svarer med en HTML-side, ikke et feed" },
   { navn: "Europa-Parlamentet", url: "https://www.europarl.europa.eu/rss/doc/top-stories/da.xml", hvad: "svarer med HTML, intet feed" },
+  {
+    navn: "GDELT DOC API",
+    url: "https://api.gdeltproject.org/api/v2/doc/doc",
+    hvad:
+      "svarer, men finder ikke dansksproget indhold. En søgning på dr.dk's " +
+      "domæne gav 17 artikler, men samme domæne kombineret med et dansk ord " +
+      "gav 0 over syv dage. Se docs/gdelt-fravalg.md",
+  },
 ];
