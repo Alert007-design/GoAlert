@@ -1,28 +1,49 @@
-import { FoundItem } from "./sources";
 import {
   alertWithResultsEmail,
   alertNoResultsEmail,
   EnrichedFoundItem,
 } from "../../_lib/email-templates";
 import { sendViaResend } from "../../_lib/resend";
+import type { GroupedItem } from "./grouping";
 
-// NB: importstierne herover antager, at denne fil ligger i app/api/cron/scan/.
-// Tilpas "../../_lib/..." hvis jeres faktiske mappestruktur er en anden.
+// Begge funktioner her returnerer, om mailen rent faktisk blev sendt.
+//
+// Det er ikke en detalje. Tidligere blev svaret kasseret, så en fejlet
+// afsendelse så ud som en succes — og omtalerne var allerede markeret som
+// set. Kunden fik dem aldrig. Nu afgør returværdien, om de gemmes.
+
+function tilMailPunkt(gruppe: GroupedItem): EnrichedFoundItem {
+  return {
+    title: gruppe.primary.title,
+    url: gruppe.primary.url,
+    source: gruppe.primary.source,
+    publishedAt: gruppe.primary.publishedAt,
+    excerpt: gruppe.primary.excerpt,
+    alsoIn: gruppe.alsoIn.length > 0 ? gruppe.alsoIn : undefined,
+  };
+}
 
 export async function sendAlertEmail(
   toEmail: string,
   customerName: string,
   keywords: string[],
-  itemsByKeyword: Record<string, FoundItem[]>
-) {
+  grupperEfterSøgeord: Record<string, GroupedItem[]>,
+  sourceIssues?: string[]
+): Promise<boolean> {
+  const itemsByKeyword: Record<string, EnrichedFoundItem[]> = {};
+  for (const [keyword, grupper] of Object.entries(grupperEfterSøgeord)) {
+    itemsByKeyword[keyword] = grupper.map(tilMailPunkt);
+  }
+
   const payload = alertWithResultsEmail({
     recipientEmail: toEmail,
     customerName: customerName || undefined,
     keywords,
-    itemsByKeyword: itemsByKeyword as Record<string, EnrichedFoundItem[]>,
+    itemsByKeyword,
+    sourceIssues,
   });
 
-  await sendViaResend({
+  return sendViaResend({
     to: toEmail,
     subject: payload.subject,
     html: payload.html,
@@ -39,7 +60,7 @@ export async function sendNoResultsEmail(
   customerName: string,
   keywords: string[],
   sourceIssues?: string[]
-) {
+): Promise<boolean> {
   const payload = alertNoResultsEmail({
     recipientEmail: toEmail,
     customerName: customerName || undefined,
@@ -47,7 +68,7 @@ export async function sendNoResultsEmail(
     sourceIssues,
   });
 
-  await sendViaResend({
+  return sendViaResend({
     to: toEmail,
     subject: payload.subject,
     html: payload.html,

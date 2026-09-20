@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDanishSource } from "../../cron/scan/sources";
+import { kræverHemmelighed } from "../../_lib/auth";
 
 // Diagnose-endpoint. Henter det samme Google News-feed som scannet og viser,
 // hvor hvert eneste item bliver af, i stedet for at man skal grave i loggen.
@@ -21,6 +22,9 @@ function decodeEntities(text: string): string {
 }
 
 export async function GET(req: NextRequest) {
+  const afvist = kræverHemmelighed(req);
+  if (afvist) return afvist;
+
   const keyword = req.nextUrl.searchParams.get("q") || "Messerschmidt";
   const maxAgeHours = Number(
     req.nextUrl.searchParams.get("timer") || process.env.SCAN_MAX_AGE_HOURS || 24

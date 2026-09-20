@@ -32,6 +32,14 @@ export interface EnrichedFoundItem extends FoundItem {
   excerpt?: string;
   type?: string; // fx "Nyhed", "Myndighedsdokument", "Video", "Podcast", "Debatindlæg"
   imageUrl?: string;
+  /**
+   * Andre medier der bragte den samme historie.
+   *
+   * Et Ritzau-telegram kan stå i fem medier på én dag. Det er én nyhed, ikke
+   * fem, så de øvrige vises som en linje under overskriften i stedet for som
+   * selvstændige punkter.
+   */
+  alsoIn?: string[];
 }
 
 const SITE_URL = "https://gossipalert.dk";
@@ -219,6 +227,13 @@ function renderResultCard(item: EnrichedFoundItem, keyword: string): string {
                 ? `<p style="margin:6px 0 0; color:#c7c3b8; font-size:13px; line-height:1.5;">${excerptEscaped}</p>`
                 : ""
             }
+            ${
+              item.alsoIn && item.alsoIn.length > 0
+                ? `<p style="margin:8px 0 0; font-family:${FONT_MONO}; font-size:11px; color:#8a93a6;">Også bragt i: ${escapeHtml(
+                    item.alsoIn.join(", ")
+                  )}</p>`
+                : ""
+            }
             <div style="margin-top:10px;">
               <a href="${hrefEscaped}" style="display:inline-block; font-family:${FONT_MONO}; font-size:12px; color:#0a0f1c; background:#f2a93b; padding:7px 14px; border-radius:3px; text-decoration:none;">Læs historien</a>
             </div>
@@ -244,13 +259,39 @@ export interface EmailPayload {
   text: string;
 }
 
+/**
+ * Advarsel om kilder, der ikke kunne tjekkes.
+ *
+ * Den skal med i BEGGE mailtyper. Fandt vi tre omtaler, men var to kilder
+ * nede, er "tre omtaler" ikke hele sandheden — og det skal kunden kunne se.
+ */
+function sourceIssuesHtml(sourceIssues?: string[]): string {
+  if (!sourceIssues || sourceIssues.length === 0) return "";
+  return `
+      <div style="margin-top:18px; padding:14px 16px; border:1px solid rgba(242,169,59,0.35); background:rgba(242,169,59,0.08); border-radius:4px;">
+        <p style="margin:0; color:#c7c3b8; font-size:13px; line-height:1.5;">
+          Bemærk: ${escapeHtml(
+            sourceIssues.join(", ")
+          )} kunne ikke tjekkes i denne omgang. Det er ikke en fejl i din overvågning — vi forsøger automatisk igen ved næste kørsel.
+        </p>
+      </div>`;
+}
+
+function sourceIssuesText(sourceIssues?: string[]): string {
+  if (!sourceIssues || sourceIssues.length === 0) return "";
+  return `Bemærk: ${sourceIssues.join(
+    ", "
+  )} kunne ikke tjekkes i denne omgang. Vi forsøger automatisk igen ved næste kørsel.`;
+}
+
 export function alertWithResultsEmail(opts: {
   recipientEmail: string;
   customerName?: string;
   keywords: string[];
   itemsByKeyword: Record<string, EnrichedFoundItem[]>;
+  sourceIssues?: string[];
 }): EmailPayload {
-  const { recipientEmail, customerName, keywords, itemsByKeyword } = opts;
+  const { recipientEmail, customerName, keywords, itemsByKeyword, sourceIssues } = opts;
   const greeting = customerName ? `Hej ${escapeHtml(customerName)},` : "Hej,";
 
   // Kun søgeord med reelle nye fund vises som sektioner.
@@ -295,6 +336,7 @@ export function alertWithResultsEmail(opts: {
   }. Se dem herunder.
     </p>
     ${sectionsHtml}
+    ${sourceIssuesHtml(sourceIssues)}
     <div style="margin-top:24px;">
       <a href="${SITE_URL}" style="display:inline-block; font-family:${FONT_MONO}; font-size:13px; color:#0a0f1c; background:#f2a93b; padding:12px 22px; border-radius:3px; text-decoration:none; font-weight:600;">Se alle omtaler</a>
     </div>
@@ -311,12 +353,15 @@ export function alertWithResultsEmail(opts: {
         (i) =>
           `- ${i.title} (${i.source})${
             formatDate(i.publishedAt) ? `, ${formatDate(i.publishedAt)}` : ""
-          }\n  ${i.url}`
+          }${i.alsoIn && i.alsoIn.length > 0 ? `\n  Også bragt i: ${i.alsoIn.join(", ")}` : ""}\n  ${i.url}`
       ),
       "",
     ]),
+    sourceIssuesText(sourceIssues),
     `Administrer din overvågning: ${MANAGE_URL}`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const subject = isSingleKeyword
     ? `Gossip Alert: ${countLabel} af "${activeKeywords[0]}"`
@@ -346,17 +391,7 @@ export function alertNoResultsEmail(opts: {
   const isSingle = keywords.length === 1;
   const keywordListEscaped = keywords.map((k) => escapeHtml(k)).join(", ");
 
-  const issuesHtml =
-    sourceIssues && sourceIssues.length > 0
-      ? `
-      <div style="margin-top:18px; padding:14px 16px; border:1px solid rgba(242,169,59,0.35); background:rgba(242,169,59,0.08); border-radius:4px;">
-        <p style="margin:0; color:#c7c3b8; font-size:13px; line-height:1.5;">
-          Bemærk: ${escapeHtml(
-            sourceIssues.join(", ")
-          )} kunne ikke tjekkes i denne omgang. Det er ikke en fejl i din overvågning — vi forsøger automatisk igen ved næste kørsel.
-        </p>
-      </div>`
-      : "";
+  const issuesHtml = sourceIssuesHtml(sourceIssues);
 
   const bodyHtml = `
     <div style="font-family:${FONT_MONO}; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:#3abfad; margin:0 0 14px;">Early-warning for dit omdømme</div>
@@ -392,11 +427,7 @@ export function alertNoResultsEmail(opts: {
     `${greeting} Gossip Alert har gennemført dagens overvågning af ${
       isSingle ? `"${keywords[0]}"` : `dine søgeord (${keywords.join(", ")})`
     } — ingen nye omtaler inden for det seneste døgn.`,
-    sourceIssues && sourceIssues.length > 0
-      ? `Bemærk: ${sourceIssues.join(
-          ", "
-        )} kunne ikke tjekkes i denne omgang. Vi forsøger automatisk igen ved næste kørsel.`
-      : "",
+    sourceIssuesText(sourceIssues),
     "",
     `Rediger din overvågning: ${MANAGE_URL}`,
   ]

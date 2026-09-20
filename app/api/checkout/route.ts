@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+import { getStripe } from "../_lib/stripe";
 
 const PRICE_BY_KEYWORD_COUNT: Record<number, string | undefined> = {
   2: process.env.STRIPE_PRICE_2KW,
@@ -48,7 +46,7 @@ export async function POST(req: NextRequest) {
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://gossipalert.dk";
 
   try {
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       mode: "subscription",
       customer_email: email,
       line_items: [{ price: priceId, quantity: 1 }],

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { harvestFeeds, FEEDS } from "../../cron/scan/feeds";
+import { matchesKeyword } from "../../cron/scan/matching";
+import { kræverHemmelighed } from "../../_lib/auth";
 
 // Sundhedstjek af nyhedskilderne. Henter alle feeds og viser, hvilke der
 // svarer, hvor mange indlæg de leverer, og hvor friske de er.
@@ -10,6 +12,9 @@ import { harvestFeeds, FEEDS } from "../../cron/scan/feeds";
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
+  const afvist = kræverHemmelighed(req);
+  if (afvist) return afvist;
+
   const keyword = req.nextUrl.searchParams.get("q");
   const timer = Number(req.nextUrl.searchParams.get("timer") || 24);
   const cutoff = new Date(Date.now() - timer * 60 * 60 * 1000);
@@ -18,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   const virkende = status.filter((s) => s.ok);
   const døde = status.filter((s) => !s.ok);
-  const friske = entries.filter((e) => e.published >= cutoff);
+  const friske = entries.filter((e) => e.published !== null && e.published >= cutoff);
 
   const svar: Record<string, unknown> = {
     opsummering: {
@@ -43,13 +48,13 @@ export async function GET(req: NextRequest) {
   };
 
   if (keyword) {
-    const needle = keyword.toLowerCase().trim();
+    // Samme matchning som i scannet: hele ord, ikke delstrenge.
     const træffere = friske
-      .filter((e) => e.haystack.includes(needle))
-      .sort((a, b) => b.published.getTime() - a.published.getTime())
+      .filter((e) => matchesKeyword(e.haystack, keyword))
+      .sort((a, b) => (b.published as Date).getTime() - (a.published as Date).getTime())
       .map((e) => ({
         kilde: e.source,
-        dato: e.published.toISOString(),
+        dato: (e.published as Date).toISOString(),
         titel: e.title.slice(0, 120),
         url: e.url,
       }));

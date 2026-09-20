@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import { welcomeEmail, goodbyeEmail } from "../../_lib/email-templates";
 import { sendViaResend } from "../../_lib/resend";
+import { getStripe } from "../../_lib/stripe";
 
 // NB: importstierne herover antager, at denne fil ligger i app/api/webhooks/stripe/.
 // Tilpas "../../_lib/..." hvis jeres faktiske mappestruktur er en anden.
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET as string;
 
 async function findCustomerRecord(
   baseId: string,
@@ -31,9 +29,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Mangler signatur." }, { status: 400 });
   }
 
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    console.error("STRIPE_WEBHOOK_SECRET mangler — webhooken kan ikke verificeres.");
+    return NextResponse.json({ error: "Ikke konfigureret." }, { status: 503 });
+  }
+
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    event = getStripe().webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err) {
     console.error("Webhook-signatur-fejl:", err);
     return NextResponse.json({ error: "Ugyldig signatur." }, { status: 400 });
