@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "../_lib/stripe";
+import { paymentsEnabled } from "../_lib/features";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(req: NextRequest) {
+  // Kundeportalen hører til betalingsfunktionen. Er den fra, kontaktes
+  // Stripe ikke, og der slås ikke op i Airtable.
+  if (!paymentsEnabled()) {
+    return NextResponse.json(
+      {
+        error: "BETALING_IKKE_AKTIV",
+        message: "Abonnementsfunktionen er ikke aktiv.",
+      },
+      { status: 503 }
+    );
+  }
+
   let body: { email?: string };
   try {
     body = await req.json();

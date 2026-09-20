@@ -1,7 +1,12 @@
 # Gossip Alert — v2
 
-Landing- og tilmeldingsside med Stripe-abonnement og daglig overvågning.
-Next.js (app router) + TypeScript, ingen eksterne UI-biblioteker.
+Omdømmeovervågning: et dagligt cronjob slår søgeord op i danske kilder og
+sender en mail med nye omtaler. Next.js (app router) + TypeScript, ingen
+eksterne UI-biblioteker.
+
+> **Tjenesten kører uden betaling og uden åben tilmelding.**
+> Betalingsfunktionen og tilmeldingsformularen er slået fra via to afbrydere,
+> se [Afbrydere](#afbrydere). Stripe-koden er bevaret og kan tændes igen.
 
 ## Struktur
 
@@ -34,6 +39,42 @@ Next.js (app router) + TypeScript, ingen eksterne UI-biblioteker.
 - `scripts/proevekoersel.ts` — prøvekørsel mod de rigtige kilder uden at
   skrive i Airtable eller sende mails
 
+## Afbrydere
+
+To miljøvariabler styrer, hvad der er tændt. Begge er **slået fra**, når de er
+tomme, og kun præcis `true` tænder dem. De skal altså tændes aktivt — glemmer
+man at sætte dem, er resultatet den lukkede tilstand.
+
+### `PAYMENTS_ENABLED` — betaling
+
+Slået fra betyder:
+
+- `/api/checkout`, `/api/portal` og `/api/webhooks/stripe` svarer 503 med en
+  forklaring og **kontakter ikke Stripe**. Webhooken verificerer ikke engang
+  signaturen.
+- Prisafsnittet forsvinder fra forsiden.
+- Ingen mail nævner abonnement, betaling eller pris, og ingen mail linker til
+  `/administrer`.
+- `/administrer` forklarer, at der ikke er noget abonnement at administrere.
+
+Ingen Stripe-kode er slettet. Sæt variablen til `true` for at tænde alt igen.
+
+### `SIGNUPS_ENABLED` — tilmelding
+
+Slået fra betyder:
+
+- Tilmeldingsformularen vises ikke på forsiden, og knapperne "Få adgang" og
+  "Skriv dig op nu" er væk.
+- `/api/signup` svarer 503 og opretter ingen i Airtable. Tjekket ligger først
+  i ruten, så en lukket formular ikke kan omgås ved at kalde adressen direkte.
+
+Egne søgeord tilføjes i stedet direkte i Airtable-tabellen `Customers`:
+opret en række med din e-mail, dine søgeord kommasepareret i `Keywords`, og
+flueben i `Active`.
+
+Er tilmelding tændt, mens betaling er slukket, kan man tilmelde sig med **op
+til 5 søgeord gratis** — der er ikke noget at opgradere til.
+
 ## Miljøvariabler
 
 Alle variabler er dokumenteret i [`.env.local.example`](.env.local.example)
@@ -55,11 +96,13 @@ Kort overblik:
 
 | Variabel | Påkrævet | Bruges af |
 | --- | --- | --- |
+| `PAYMENTS_ENABLED` | nej — **fra** som standard | hele betalingsfunktionen |
+| `SIGNUPS_ENABLED` | nej — **fra** som standard | forside, signup |
 | `AIRTABLE_TOKEN`, `AIRTABLE_BASE_ID` | ja | signup, checkout-webhook, portal, scan |
 | `AIRTABLE_TABLE_NAME` | nej (default `Signups`) | signup |
-| `STRIPE_SECRET_KEY` | ja | checkout, portal, webhook |
-| `STRIPE_WEBHOOK_SECRET` | ja | webhook |
-| `STRIPE_PRICE_2KW` … `STRIPE_PRICE_5KW` | ja | checkout |
+| `STRIPE_SECRET_KEY` | kun hvis betaling er til | checkout, portal, webhook |
+| `STRIPE_WEBHOOK_SECRET` | kun hvis betaling er til | webhook |
+| `STRIPE_PRICE_2KW` … `STRIPE_PRICE_5KW` | kun hvis betaling er til | checkout |
 | `RESEND_API_KEY`, `RESEND_FROM` | ja (begge) | scan |
 | `REDDIT_ENABLED` + nøgler | nej — Reddit er slået fra | scan |
 | `CRON_SECRET` | **ja** — uden den er scan og debug låst | scan, debug |

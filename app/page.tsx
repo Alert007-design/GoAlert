@@ -1,8 +1,9 @@
 import SignalBars from "./SignalBars";
 import SignupForm from "./SignupForm";
 import { fetchTopDanishStories, TopStory } from "./api/cron/scan/sources";
+import { paymentsEnabled, signupsEnabled } from "./api/_lib/features";
 
-const STEPS = [
+const STEPS_ÅBEN = [
   {
     n: "1",
     title: "Opret dine søgeord",
@@ -20,7 +21,19 @@ const STEPS = [
   },
 ];
 
-const EXPLAINERS = [
+// Når tilmelding er lukket, giver trin 1 ingen mening — der er ingen formular
+// at udfylde. Teksten beskriver i stedet, hvad tjenesten gør.
+const STEPS_LUKKET = [
+  {
+    n: "1",
+    title: "Søgeord sættes op",
+    body: "Overvågningen bygger på søgeord — et navn, en virksomhed eller et emne. Gossip Alert kører i en lukket udgave, hvor søgeordene sættes op manuelt.",
+  },
+  STEPS_ÅBEN[1],
+  STEPS_ÅBEN[2],
+];
+
+const EXPLAINERS_ÅBEN = [
   {
     title: "Hvad overvåger vi?",
     body: "Gossip Alert holder øje med et voksende udvalg af offentligt og teknisk tilgængelige danske nyhedskilder. Vi udvider løbende dækningen, men ingen tjeneste kan garantere at fange alt, der bliver skrevet.",
@@ -39,6 +52,20 @@ const EXPLAINERS = [
   },
 ];
 
+// Erstatter afsnittet om oprettelse, når der ikke er nogen formular.
+const EXPLAINER_LUKKET = {
+  title: "Kan jeg få en overvågning?",
+  body: "Gossip Alert tager ikke imod nye tilmeldinger lige nu. Tjenesten kører i en lukket udgave til privat brug.",
+};
+
+const EXPLAINERS_LUKKET = [
+  EXPLAINERS_ÅBEN[0],
+  EXPLAINER_LUKKET,
+  EXPLAINERS_ÅBEN[2],
+  EXPLAINERS_ÅBEN[3],
+];
+
+// Priserne hører til betalingsfunktionen og vises kun, når den er slået til.
 const PRICE_TIERS = [
   { label: "1. søgeord", value: "Gratis", unit: "" },
   { label: "2. søgeord", value: "19 kr", unit: "/md" },
@@ -62,6 +89,14 @@ async function getTodaysStories(): Promise<TopStory[]> {
 export default async function Home() {
   const stories = await getTodaysStories();
 
+  // Afbryderne afgør, hvad der overhovedet vises. Ingen priser og ingen
+  // tilmelding, medmindre funktionerne er slået udtrykkeligt til.
+  const tilmeldingÅben = signupsEnabled();
+  const betalingTil = paymentsEnabled();
+
+  const steps = tilmeldingÅben ? STEPS_ÅBEN : STEPS_LUKKET;
+  const explainers = tilmeldingÅben ? EXPLAINERS_ÅBEN : EXPLAINERS_LUKKET;
+
   return (
     <main>
       <header className="topbar">
@@ -69,9 +104,11 @@ export default async function Home() {
           <span className="logo">
             Gossip<span className="logoAccent">Alert</span>
           </span>
-          <a href="#adgang" className="topbarCta">
-            Få adgang
-          </a>
+          {tilmeldingÅben && (
+            <a href="#adgang" className="topbarCta">
+              Få adgang
+            </a>
+          )}
         </div>
       </header>
 
@@ -90,10 +127,20 @@ export default async function Home() {
               stoppes. Ikke dagen efter. Med det samme.
             </p>
             <div id="adgang" className="heroForm">
-              <SignupForm />
-              <p className="heroFormNote">
-                Gratis at skrive dig op. Ingen kortoplysninger. Uforpligtende.
-              </p>
+              {tilmeldingÅben ? (
+                <>
+                  <SignupForm paymentsEnabled={betalingTil} />
+                  <p className="heroFormNote">
+                    {betalingTil
+                      ? "Gratis at skrive dig op. Ingen kortoplysninger. Uforpligtende."
+                      : "Gratis at skrive dig op. Ingen betaling."}
+                  </p>
+                </>
+              ) : (
+                <p className="heroFormNote">
+                  Gossip Alert tager ikke imod nye tilmeldinger lige nu.
+                </p>
+              )}
             </div>
           </div>
 
@@ -134,7 +181,7 @@ export default async function Home() {
         <div className="wrap">
           <p className="eyebrow">Hvad er Gossip Alert?</p>
           <div className="explainerGrid">
-            {EXPLAINERS.map((item) => (
+            {explainers.map((item) => (
               <div className="explainerBlock" key={item.title}>
                 <h3>{item.title}</h3>
                 <p>{item.body}</p>
@@ -148,7 +195,7 @@ export default async function Home() {
         <div className="wrap">
           <p className="eyebrow">Sådan virker det</p>
           <div className="processGrid">
-            {STEPS.map((step) => (
+            {steps.map((step) => (
               <div className="processStep" key={step.n}>
                 <span className="processN">{step.n}</span>
                 <h3>{step.title}</h3>
@@ -159,6 +206,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {betalingTil && (
       <section className="pricing">
         <div className="wrap">
           <p className="eyebrow">Pris</p>
@@ -193,7 +241,9 @@ export default async function Home() {
           </ul>
         </div>
       </section>
+      )}
 
+      {tilmeldingÅben && (
       <section className="closing">
         <div className="wrap closingInner">
           <h2>Rygter venter ikke. Det bør du heller ikke.</h2>
@@ -202,6 +252,7 @@ export default async function Home() {
           </a>
         </div>
       </section>
+      )}
 
       <footer className="footer">
         <div className="wrap footerInner">

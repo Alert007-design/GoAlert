@@ -42,8 +42,18 @@ export interface EnrichedFoundItem extends FoundItem {
   alsoIn?: string[];
 }
 
+import { paymentsEnabled } from "./features";
+
 const SITE_URL = "https://gossipalert.dk";
 const MANAGE_URL = `${SITE_URL}/administrer`;
+
+// Siden /administrer findes kun for at åbne Stripes kundeportal. Er betaling
+// slået fra, giver den ingen mening, og der må ikke linkes til den fra nogen
+// mail. Teksterne skifter derfor sammen med afbryderen i stedet for at blive
+// slettet — så kan alt tændes igen ved at ændre miljøvariablen.
+function visAbonnement(): boolean {
+  return paymentsEnabled();
+}
 
 const FONT_DISPLAY = "Georgia, 'Times New Roman', serif";
 const FONT_BODY =
@@ -157,8 +167,12 @@ function emailLayout(opts: {
             <tr>
               <td style="padding:24px 32px 32px 32px; border-top:1px solid #1b2338;">
                 <p style="margin:0 0 10px; font-family:${FONT_MONO}; font-size:12px; color:#8a93a6;">
-                  Sendt til ${escapeHtml(recipientEmail)}.
-                  <a href="${MANAGE_URL}" style="color:#3abfad; text-decoration:underline;">Administrer din overvågning</a>
+                  Sendt til ${escapeHtml(recipientEmail)}.${
+                    visAbonnement()
+                      ? `
+                  <a href="${MANAGE_URL}" style="color:#3abfad; text-decoration:underline;">Administrer din overvågning</a>`
+                      : ""
+                  }
                 </p>
                 <p style="margin:0; font-family:${FONT_MONO}; font-size:12px; color:#8a93a6;">
                   Gossip Alert &middot; <a href="${SITE_URL}" style="color:#8a93a6;">gossipalert.dk</a>
@@ -358,7 +372,7 @@ export function alertWithResultsEmail(opts: {
       "",
     ]),
     sourceIssuesText(sourceIssues),
-    `Administrer din overvågning: ${MANAGE_URL}`,
+    visAbonnement() ? `Administrer din overvågning: ${MANAGE_URL}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -416,9 +430,13 @@ export function alertNoResultsEmail(opts: {
       Vil du udvide overvågningen — fx med alternative stavemåder, dit fulde navn eller din virksomheds navn? Du kan tilføje flere søgeord når som helst.
     </p>
     ${issuesHtml}
-    <div style="margin-top:22px;">
+    ${
+      visAbonnement()
+        ? `<div style="margin-top:22px;">
       <a href="${MANAGE_URL}" style="display:inline-block; font-family:${FONT_MONO}; font-size:13px; color:#0a0f1c; background:#f2a93b; padding:12px 22px; border-radius:3px; text-decoration:none; font-weight:600;">Rediger min overvågning</a>
-    </div>
+    </div>`
+        : ""
+    }
   `;
 
   const text = [
@@ -429,7 +447,7 @@ export function alertNoResultsEmail(opts: {
     } — ingen nye omtaler inden for det seneste døgn.`,
     sourceIssuesText(sourceIssues),
     "",
-    `Rediger din overvågning: ${MANAGE_URL}`,
+    visAbonnement() ? `Rediger din overvågning: ${MANAGE_URL}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -463,7 +481,9 @@ export function welcomeEmail(opts: {
       Din overvågning er sat i gang
     </h1>
     <p style="color:#c7c3b8; font-size:14px; line-height:1.6; margin:0 0 14px;">
-      Hej, og velkommen til Gossip Alert. Tak fordi du er blevet kunde hos os.
+      Hej, og velkommen til Gossip Alert.${
+        visAbonnement() ? " Tak fordi du er blevet kunde hos os." : ""
+      }
     </p>
     ${
       keywordList
@@ -475,18 +495,22 @@ export function welcomeEmail(opts: {
     <p style="color:#c7c3b8; font-size:14px; line-height:1.6; margin:0 0 20px;">
       Så snart vi finder noget relevant, får du besked med det samme. Finder vi intet, hører du også fra os — så du altid ved, at overvågningen kører.
     </p>
-    <div style="margin-top:8px;">
+    ${
+      visAbonnement()
+        ? `<div style="margin-top:8px;">
       <a href="${MANAGE_URL}" style="display:inline-block; font-family:${FONT_MONO}; font-size:13px; color:#0a0f1c; background:#f2a93b; padding:12px 22px; border-radius:3px; text-decoration:none; font-weight:600;">Administrer din overvågning</a>
-    </div>
+    </div>`
+        : ""
+    }
   `;
 
   const text = [
     "Velkommen til Gossip Alert",
     "",
-    "Hej, og velkommen til Gossip Alert. Tak fordi du er blevet kunde hos os.",
+    "Hej, og velkommen til Gossip Alert.",
     keywordList ? `Vi holder nu øje med: ${keywordList}.` : "",
     "",
-    `Administrer din overvågning: ${MANAGE_URL}`,
+    visAbonnement() ? `Administrer din overvågning: ${MANAGE_URL}` : "",
   ]
     .filter(Boolean)
     .join("\n");

@@ -12,7 +12,17 @@ const PRICE_BY_COUNT: Record<number, number> = {
   5: 49,
 };
 
-export default function SignupForm() {
+/**
+ * Formularen kender ikke selv miljøvariablerne — den kører i browseren.
+ * Forsiden læser afbryderen på serveren og sender svaret med herind.
+ * Standard er FRA, så formularen aldrig kan komme til at vise priser ved
+ * en fejl.
+ */
+export default function SignupForm({
+  paymentsEnabled = false,
+}: {
+  paymentsEnabled?: boolean;
+}) {
   const [email, setEmail] = useState("");
   const [keywords, setKeywords] = useState<string[]>([""]);
   const [status, setStatus] = useState<Status>("idle");
@@ -50,7 +60,9 @@ export default function SignupForm() {
     setMessage("");
 
     try {
-      if (cleanedKeywords.length === 1) {
+      // Uden betaling går ALLE søgeord gennem den gratis rute. Der er intet
+      // at betale for, og Stripe må ikke kontaktes.
+      if (!paymentsEnabled || cleanedKeywords.length === 1) {
         // Gratis flow: opret direkte via /api/signup
         const res = await fetch("/api/signup", {
           method: "POST",
@@ -156,7 +168,9 @@ export default function SignupForm() {
       )}
 
       <p className="heroFormNote" style={{ marginTop: "10px" }}>
-        {keywords.length === 1
+        {!paymentsEnabled
+          ? "Op til 5 søgeord. Gratis."
+          : keywords.length === 1
           ? "Det første søgeord er gratis."
           : `${keywords.length} søgeord: ${price} kr./md. (første er gratis, herefter betaling)`}
         {" "}Har du brug for flere end 5 søgeord? Skriv til os.
@@ -170,9 +184,9 @@ export default function SignupForm() {
       >
         {status === "loading"
           ? "Sender…"
-          : keywords.length === 1
-          ? "Få adgang"
-          : "Gå til betaling"}
+          : paymentsEnabled && keywords.length > 1
+          ? "Gå til betaling"
+          : "Få adgang"}
       </button>
 
       {status === "error" && (

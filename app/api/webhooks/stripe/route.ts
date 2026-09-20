@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { welcomeEmail, goodbyeEmail } from "../../_lib/email-templates";
 import { sendViaResend } from "../../_lib/resend";
 import { getStripe } from "../../_lib/stripe";
+import { paymentsEnabled } from "../../_lib/features";
 
 // NB: importstierne herover antager, at denne fil ligger i app/api/webhooks/stripe/.
 // Tilpas "../../_lib/..." hvis jeres faktiske mappestruktur er en anden.
@@ -22,6 +23,20 @@ async function findCustomerRecord(
 }
 
 export async function POST(req: NextRequest) {
+  // Er betaling slået fra, behandles ingen Stripe-begivenheder. Signaturen
+  // verificeres ikke, og der skrives ikke i Airtable — vi rører slet ikke
+  // Stripe. Svaret er 503, så Stripe kan se, at modtageren er lukket.
+  if (!paymentsEnabled()) {
+    console.warn("Stripe-webhook modtaget, men betaling er slået fra. Ignoreret.");
+    return NextResponse.json(
+      {
+        error: "BETALING_IKKE_AKTIV",
+        message: "Betalingsfunktionen er ikke aktiv.",
+      },
+      { status: 503 }
+    );
+  }
+
   const body = await req.text();
   const signature = req.headers.get("stripe-signature");
 
