@@ -45,6 +45,8 @@ eksterne UI-biblioteker.
 - `scripts/tjek-kilder.ts` — afprøver kildeadresser med rigtige kald, så
   ingen adresse gættes
 - `docs/tilfoej-kilder.md` — klikvejledning til at tilføje hver slags kilde
+- `docs/gdelt-fravalg.md` — hvorfor GDELT er afprøvet og fravalgt
+- `scripts/tjek-gdelt.ts` — beviser, at ingen udenlandsk kilde slipper igennem
 - `docs/reddit-ansoegning.md` — sådan søger du om Reddit-adgang
 - `docs/meta-ansoegning.md` — hvad en Facebook/Instagram-ansøgning kræver
 
@@ -254,6 +256,35 @@ To ting er værd at vide:
 Alle platforme er underlagt præcis de samme regler om 24 timer og ingen
 gentagelser. Det er ikke til forhandling pr. platform — de går alle gennem
 det samme ene sted.
+
+### Kontrol af, at en kilde er dansk
+
+Google News blev droppet, fordi den leverede norske kilder, selvom vi bad om
+danske. Lektien er, at en udbyders eget landefilter ikke kan bruges som facit.
+
+`danske-kilder.ts` indeholder derfor vores **egen** kontrol. Den er bevidst
+stram: en artikel slipper kun igennem, hvis værtsnavnet ender på `.dk` eller
+står på en udtrykkelig liste. Alt andet afvises — også hvis kilden selv
+påstår at være dansk.
+
+Afvejningen er med vilje: vi taber hellere en dansk artikel på et
+`.com`-domæne end sender en norsk artikel ud som dansk. En manglende omtale
+er en skuffelse, en forkert omtale er en fejl.
+
+Kontrollen er dækket af tests, der fejler, hvis så meget som ét norsk eller
+svensk domæne slipper igennem — inklusive tilfældet, hvor udbyderen markerer
+en norsk kilde som dansk.
+
+### GDELT er afprøvet og fravalgt
+
+GDELT var tænkt som erstatning for Google News. Den er **ikke** taget i brug,
+fordi den ikke finder dansksproget indhold: en søgning på dr.dk's domæne gav
+17 artikler, men samme domæne kombineret med et dansk søgeord gav 0 over syv
+dage. Uden landefilter var ingen af de 75 resultater på et `.dk`-domæne.
+
+Koden findes og er slået fra (`GDELT_ENABLED`). Hele begrundelsen, målingerne
+og hvad der skal til for at tage den op igen, står i
+**[docs/gdelt-fravalg.md](docs/gdelt-fravalg.md)**.
 
 ### Reglen om kildeadresser
 
