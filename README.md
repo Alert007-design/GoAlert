@@ -33,11 +33,17 @@ eksterne UI-biblioteker.
   - `urls.ts` — URL-normalisering
   - `grouping.ts` — dedup og gruppering af samme historie
   - `matching.ts` — søgeord matches som hele ord, også med æ, ø og å
-  - `feeds.ts` — listen over RSS-kilder
+  - `feeds.ts` — hentning og læsning af feeds
+  - `sources-table.ts` — kildelisten fra Airtable
+  - `anbefalede-kilder.ts` — de 25 bekræftede kilder, og de afprøvede der
+    ikke virker
+  - `kildeliste.ts` — reservelisten, hvis Airtable ikke kan læses
 - `app/api/debug/` — hjælperuter til at inspicere feeds og nyhedsfund.
   Kræver `CRON_SECRET` ligesom scannet
 - `scripts/proevekoersel.ts` — prøvekørsel mod de rigtige kilder uden at
   skrive i Airtable eller sende mails
+- `scripts/tjek-kilder.ts` — afprøver kildeadresser med rigtige kald, så
+  ingen adresse gættes
 - `docs/reddit-ansoegning.md` — sådan søger du om Reddit-adgang
 - `docs/meta-ansoegning.md` — hvad en Facebook/Instagram-ansøgning kræver
 
@@ -201,6 +207,52 @@ med en linje i loggen i stedet for at vælte kørslen.
 
 Er tabellen tom, eller har ingen rækker flueben i `Active`, bruges
 reservelisten — det er næsten altid en fejl, ikke et ønske om ingen kilder.
+
+### Sådan fylder du tabellen op
+
+De anbefalede kilder ligger i `app/api/cron/scan/anbefalede-kilder.ts`. De
+lægges ind i Airtable med:
+
+```
+GET /api/debug/sources            viser kun, hvad der ville ske
+GET /api/debug/sources?tilfoej=1  opretter de manglende rækker
+```
+
+Ruten kan køres igen og igen uden at lave rod:
+
+- Der tilføjes **kun** kilder, tabellen ikke har i forvejen.
+- Der sammenlignes på normaliseret adresse, så `www`, `http` og en
+  afsluttende skråstreg ikke narrer den til at oprette en dublet.
+- Eksisterende rækker ændres **aldrig**, og der slettes aldrig noget.
+- En kilde, du bevidst har slået fra i Airtable, bliver ikke tilføjet igen.
+
+Kilder, du selv har tilføjet, vises under `dineEgneKilder` — de røres ikke.
+
+### Reglen om kildeadresser
+
+**En feed-adresse må aldrig gættes.** En adresse må kun stå i den anbefalede
+liste, hvis den er afprøvet med et rigtigt kald og har svaret med læsbare
+indlæg. Efterprøv hele listen med:
+
+```
+npx tsx scripts/tjek-kilder.ts
+```
+
+Eller afprøv en kandidat, før den tilføjes:
+
+```
+npx tsx scripts/tjek-kilder.ts https://eksempel.dk/rss
+```
+
+Scriptet bruger den samme parser som selve scannet, så "virker her" betyder
+"virker i scannet" — ikke bare "serveren svarede". Det afslutter med en
+fejlkode, hvis en kilde ikke leverer læsbare indlæg, så det kan bruges som en
+kontrol og ikke bare en udskrift.
+
+Adresser, der **er** afprøvet og ikke virker, står i `AFPRØVET_UDEN_HELD` i
+samme fil — med grunden. Det er for at ingen, heller ikke om et halvt år,
+prøver den samme døde adresse igen i god tro. En test sikrer, at en adresse
+ikke kan stå begge steder.
 
 ### Kildetjek — også fra Vercel
 

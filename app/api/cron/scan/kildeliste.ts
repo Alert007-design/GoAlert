@@ -6,39 +6,33 @@
 // Airtable er nede. Uden den ville en manglende tabel betyde en tavs dag
 // uden overvågning, og det er værre end en lidt forældet liste.
 //
+// Listen er den samme som de anbefalede kilder, så de to aldrig kan komme
+// til at sige noget forskelligt. Skal en kilde tilføjes eller fjernes, sker
+// det ét sted: i anbefalede-kilder.ts — og kun med en bekræftet adresse.
+//
 // Et mediefeed indeholder typisk kun de seneste 10-50 artikler. Med én daglig
 // kørsel kan travle feeds nå at rulle forbi mellem to scanninger — det er en
 // kendt begrænsning, ikke en fejl.
+
+import { ANBEFALEDE_KILDER } from "./anbefalede-kilder";
 
 export type Feed = {
   /** Vises som kildenavn i mails og i Airtable. */
   name: string;
   url: string;
   /**
-   * false = adressen er ikke bekræftet med et rigtigt kald.
-   * Alle nedenstående er bekræftet 20/9 2026.
+   * Er adressen afprøvet med et rigtigt kald?
+   *
+   * Alle kilder i den anbefalede liste ER afprøvet — det er betingelsen for
+   * at stå der. Kør `npx tsx scripts/tjek-kilder.ts` for at efterprøve det.
    */
   verified: boolean;
 };
 
-export const FALLBACK_FEEDS: Feed[] = [
-  { name: "DR", url: "https://www.dr.dk/nyheder/service/feeds/senestenyt", verified: true },
-  { name: "DR Indland", url: "https://www.dr.dk/nyheder/service/feeds/indland", verified: true },
-  { name: "DR Politik", url: "https://www.dr.dk/nyheder/service/feeds/politik", verified: true },
-  { name: "DR Penge", url: "https://www.dr.dk/nyheder/service/feeds/penge", verified: true },
-  { name: "DR Udland", url: "https://www.dr.dk/nyheder/service/feeds/udland", verified: true },
-  { name: "DR Kultur", url: "https://www.dr.dk/nyheder/service/feeds/kultur", verified: true },
-  { name: "DR Viden", url: "https://www.dr.dk/nyheder/service/feeds/viden", verified: true },
-  { name: "Politiken", url: "https://politiken.dk/rss/senestenyt.rss", verified: true },
-  { name: "Information", url: "https://www.information.dk/feed", verified: true },
-  { name: "Ekstra Bladet", url: "https://ekstrabladet.dk/rssfeed/all/", verified: true },
-  { name: "Berlingske", url: "https://www.berlingske.dk/content/rss", verified: true },
-  { name: "Altinget", url: "https://www.altinget.dk/rss", verified: true },
-  { name: "B.T.", url: "https://www.bt.dk/bt/seneste/rss", verified: true },
-  { name: "Børsen", url: "https://borsen.dk/rss", verified: true },
-
-  // TV 2 på landsplan er ude: services.tv2.dk findes ikke længere i DNS, og
-  // seks andre oplagte adresser svarer med TV 2's fejlside. Der gættes ikke
-  // en ny adresse. TV 2's regionale stationer virker derimod — de tilføjes
-  // i tabellen Sources, ikke her.
-];
+export const FALLBACK_FEEDS: Feed[] = ANBEFALEDE_KILDER.filter(
+  (k) => k.type === "feed"
+).map((k) => ({
+  name: k.name,
+  url: k.url,
+  verified: Boolean(k.bekræftet),
+}));
