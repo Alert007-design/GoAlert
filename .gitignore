@@ -1,0 +1,28 @@
+# Afhængigheder
+node_modules/
+
+# Next.js build-output
+.next/
+out/
+next-env.d.ts
+
+# Miljøvariabler — hemmeligheder må aldrig i repoet.
+# .env.local.example er undtaget, den indeholder kun variabelnavne.
+.env
+.env.*
+!.env.local.example
+
+# Vercel
+.vercel/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor og OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
