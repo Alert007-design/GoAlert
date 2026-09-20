@@ -8,6 +8,8 @@
 // kørsel kan travle feeds nå at rulle forbi mellem to scanninger — det er en
 // kendt begrænsning, ikke en fejl.
 
+import { parsePublishedAt } from "./dates";
+
 export type FoundItem = {
   title: string;
   url: string;
@@ -37,19 +39,20 @@ export const FEEDS: Feed[] = [
   { name: "DR Kultur", url: "https://www.dr.dk/nyheder/service/feeds/kultur", verified: true },
   { name: "DR Viden", url: "https://www.dr.dk/nyheder/service/feeds/viden", verified: true },
 
-  // Ikke bekræftet — sundhedstjekket afgør, om adresserne holder.
-  { name: "Politiken", url: "https://politiken.dk/rss/senestenyt.rss", verified: false },
-  { name: "Information", url: "https://www.information.dk/feed", verified: false },
-  { name: "Ekstra Bladet", url: "https://ekstrabladet.dk/rssfeed/all/", verified: false },
-  // TV 2 svarede "fetch failed" (ingen HTTP-status), hvilket typisk betyder at
-  // værten afviser forbindelsen eller ikke kan slås op fra Vercel. Adressen kan
-  // være rigtig alligevel. Jyllands-Posten og Kristeligt Dagblad er taget ud,
-  // indtil deres rigtige feed-adresser er fundet.
-  { name: "TV 2", url: "https://services.tv2.dk/api/feeds/nyheder/rss", verified: false },
-  { name: "Berlingske", url: "https://www.berlingske.dk/content/rss", verified: false },
-  { name: "Altinget", url: "https://www.altinget.dk/rss", verified: false },
-  { name: "B.T.", url: "https://www.bt.dk/bt/seneste/rss", verified: false },
-  { name: "Børsen", url: "https://borsen.dk/rss", verified: false },
+  // Afprøvet med rigtige kald 20/9 2026 — alle svarede med læsbare indlæg.
+  { name: "Politiken", url: "https://politiken.dk/rss/senestenyt.rss", verified: true },
+  { name: "Information", url: "https://www.information.dk/feed", verified: true },
+  { name: "Ekstra Bladet", url: "https://ekstrabladet.dk/rssfeed/all/", verified: true },
+  { name: "Berlingske", url: "https://www.berlingske.dk/content/rss", verified: true },
+  { name: "Altinget", url: "https://www.altinget.dk/rss", verified: true },
+  { name: "B.T.", url: "https://www.bt.dk/bt/seneste/rss", verified: true },
+  { name: "Børsen", url: "https://borsen.dk/rss", verified: true },
+
+  // TV 2 er taget ud. Værtsnavnet services.tv2.dk findes ikke længere i DNS,
+  // og seks andre oplagte adresser (nyheder.tv2.dk/rss, /feed, tv2.dk/rss m.fl.)
+  // svarer alle med TV 2's fejlside. Der gættes ikke en ny adresse ind her —
+  // kilden kan tilføjes igen, når en officiel feed-adresse er bekræftet.
+  // Jyllands-Posten og Kristeligt Dagblad er ude af samme grund.
 ];
 
 const FEED_TIMEOUT_MS = 8000;
@@ -110,8 +113,17 @@ export type FeedEntry = {
   title: string;
   url: string;
   source: string;
-  published: Date;
-  /** Titel + resumé, små bogstaver — det felt vi søger i. */
+  /** Kildens rå datotekst. Sendes videre til den centrale aldersregel. */
+  publishedRaw: string;
+  /** Samme dato omregnet til UTC. Null hvis den ikke kunne læses. */
+  published: Date | null;
+  /** Feedets eget resumé, renset for HTML. Bruges som uddrag i mailen. */
+  summary: string;
+  /**
+   * Titel og resumé samlet med et LINJESKIFT imellem, i små bogstaver.
+   * Linjeskiftet er med vilje: et søgeord med flere ord må ikke kunne matche
+   * hen over overgangen fra titel til resumé og give et falsk træf.
+   */
   haystack: string;
 };
 
@@ -145,8 +157,12 @@ export function parseFeed(xml: string, sourceName: string): FeedEntry[] {
     ]);
     if (!rawDate) continue;
 
-    const published = new Date(decodeEntities(rawDate));
-    if (Number.isNaN(published.getTime())) continue;
+    // Datoen tolkes ét sted (dates.ts), så tidszoner håndteres ens for alle
+    // kilder. Kan den ikke læses, springes indlægget over her — det må aldrig
+    // gå videre uden dato og få "nu" påklistret senere.
+    const publishedRaw = decodeEntities(rawDate);
+    const parsedDate = parsePublishedAt(publishedRaw);
+    if (!parsedDate) continue;
 
     const rawSummary =
       firstMatch(block, [
@@ -161,8 +177,10 @@ export function parseFeed(xml: string, sourceName: string): FeedEntry[] {
       title,
       url: decodeEntities(rawLink).trim(),
       source: sourceName,
-      published,
-      haystack: `${title} ${summary}`.toLowerCase(),
+      publishedRaw,
+      published: parsedDate.date,
+      summary,
+      haystack: `${title}\n${summary}`.toLowerCase(),
     });
   }
 
@@ -213,8 +231,11 @@ async function fetchOneFeed(feed: Feed): Promise<{ entries: FeedEntry[]; status:
 
     const xml = await res.text();
     const entries = parseFeed(xml, feed.name);
-    const nyeste = entries.length
-      ? new Date(Math.max(...entries.map((e) => e.published.getTime()))).toISOString()
+    const tidspunkter = entries
+      .map((e) => e.published?.getTime())
+      .filter((t): t is number => typeof t === "number");
+    const nyeste = tidspunkter.length
+      ? new Date(Math.max(...tidspunkter)).toISOString()
       : null;
 
     return {
