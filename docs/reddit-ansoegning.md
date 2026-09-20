@@ -1,8 +1,23 @@
-# Sådan søger du om adgang til Reddits API
+# Reddit-adgang: ansøgning og opsætning
 
-Reddit er slået fra i Gossip Alert og forbliver slukket, indtil du har fået
-godkendelsen. Når du har den, tændes kilden ved at sætte `REDDIT_ENABLED=true`
-og de to nøgler i Vercel — koden er der allerede.
+> **Status: ansøgningen er sendt 20. september 2026 fra kontoen
+> `u/OldEmploy3572`.** Vi venter på svar fra Reddit.
+>
+> Reddit er slået fra i Gossip Alert (`REDDIT_ENABLED`) og forbliver slukket,
+> indtil godkendelsen er i hus.
+
+## Rækkefølgen
+
+Det er vigtigt, og det stod forkert i en tidligere udgave af dette dokument:
+
+1. **Først** søger du om adgang hos Reddit.
+2. **Derefter**, når godkendelsen er i hus, opretter du appen på
+   `reddit.com/prefs/apps` og henter nøglerne.
+3. Til sidst sætter du nøglerne i Vercel.
+
+Der er ingen grund til at oprette en app, før ansøgningen er godkendt —
+nøglerne kan alligevel ikke bruges til noget uden godkendelsen, og
+ansøgningen kræver dem ikke.
 
 ## Hvorfor det er nødvendigt
 
@@ -19,33 +34,26 @@ pause mellem kaldene.
 100 kald i minuttet. Gossip Alert laver nogle få kald om dagen, så du er
 langt under grænsen.
 
-## Trin 1 — Opret en app hos Reddit
+---
 
-1. Log ind på din Reddit-konto
-2. Gå til <https://www.reddit.com/prefs/apps>
-3. Rul ned og klik **create another app...**
-4. Udfyld:
-   - **name**: `Gossip Alert`
-   - **type**: vælg **script** — det er den rigtige til noget, der kun kører
-     på din egen server og kun læser
-   - **description**: `Privat omdømmeovervågning. Kun læsning, få kald dagligt.`
-   - **about url**: `https://www.gossipalert.dk`
-   - **redirect uri**: `https://www.gossipalert.dk` — feltet skal udfyldes,
-     men bruges ikke af en script-app
-5. Klik **create app**
+## Trin 1 — Søg om adgang
 
-Du får nu to værdier: et **client id** (den korte streng lige under appens
-navn) og en **secret**. De skal i Vercel, ikke i koden — se sidst i dokumentet.
+Gå til <https://support.reddithelp.com/hc/en-us/requests/new> og vælg
+kategorien for API- eller udvikleradgang.
 
-## Trin 2 — Søg om adgang til data
+### Det, der er vigtigt at få med
 
-Reddit kræver, at du beskriver, hvad du bruger data til. Gå til
-<https://support.reddithelp.com/hc/en-us/requests/new> og vælg kategorien for
-API- eller udvikleradgang.
+Reddit afviser ofte ansøgninger, der er vage om formålet. Sørg for, at disse
+fire ting står tydeligt:
+
+- **kun læsning** — ingen opslag, stemmer eller beskeder
+- **lav volumen** — få kald om dagen
+- **ikke-kommerciel** — ingen kunder, ingen reklamer, ingen videresalg
+- **hvad du gemmer** — og hvorfor du overhovedet gemmer noget
 
 ### Forslag til teksten
 
-Skriv på engelsk. Du kan bruge dette og rette til, så det passer:
+Skriv på engelsk. Denne tekst dækker de fire punkter:
 
 > **Use case:** Personal reputation monitoring for myself.
 >
@@ -67,31 +75,58 @@ Skriv på engelsk. Du kan bruge dette og rette til, så det passer:
 > with anyone else.
 >
 > **App name:** Gossip Alert
-> **Client ID:** (indsæt dit client id her)
 
-### Det, der er vigtigt at få med
+---
 
-Reddit afviser ofte ansøgninger, der er vage om formålet. Sørg for, at disse
-fire ting står tydeligt:
+## Indsendt tekst
 
-- **kun læsning** — ingen opslag, stemmer eller beskeder
-- **lav volumen** — få kald om dagen
-- **ikke-kommerciel** — ingen kunder, ingen reklamer, ingen videresalg
-- **hvad du gemmer** — og hvorfor du overhovedet gemmer noget
+*Den faktiske tekst, som blev sendt til Reddit den 20. september 2026 fra
+`u/OldEmploy3572`. Indsæt den her, så vi ved præcis, hvad der er lovet — det
+er den, vi skal holde os til, hvis adgangen senere skal bruges eller udvides.*
 
-## Trin 3 — Når du har fået godkendelsen
+<!-- Indsæt den indsendte tekst nedenfor. -->
 
-Sæt tre miljøvariabler i Vercel under **Settings → Environment Variables**:
+```
+(indsæt her)
+```
+
+**Svar fra Reddit:** *(udfyldes, når der kommer svar — dato og udfald)*
+
+---
+
+## Trin 2 — Opret appen, når du er godkendt
+
+Først når godkendelsen er i hus:
+
+1. Log ind på Reddit med `u/OldEmploy3572`
+2. Gå til <https://www.reddit.com/prefs/apps>
+3. Rul ned og klik **create another app...**
+4. Udfyld:
+   - **name**: `Gossip Alert`
+   - **type**: vælg **script** — det er den rigtige til noget, der kun kører
+     på din egen server og kun læser
+   - **description**: `Privat omdømmeovervågning. Kun læsning, få kald dagligt.`
+   - **about url**: `https://www.gossipalert.dk`
+   - **redirect uri**: `https://www.gossipalert.dk` — feltet skal udfyldes,
+     men bruges ikke af en script-app
+5. Klik **create app**
+
+Du får nu to værdier: et **client id** (den korte streng lige under appens
+navn) og en **secret**.
+
+## Trin 3 — Sæt nøglerne i Vercel
+
+Under **Settings → Environment Variables**:
 
 | Navn | Værdi |
 | --- | --- |
 | `REDDIT_ENABLED` | `true` |
-| `REDDIT_CLIENT_ID` | dit client id fra trin 1 |
-| `REDDIT_CLIENT_SECRET` | din secret fra trin 1 |
+| `REDDIT_CLIENT_ID` | dit client id fra trin 2 |
+| `REDDIT_CLIENT_SECRET` | din secret fra trin 2 |
+| `REDDIT_USER_AGENT` | `server:gossip-alert:v1.0 (by /u/OldEmploy3572)` |
 
-Sæt desuden `REDDIT_USER_AGENT` til noget, der identificerer dig, for eksempel
-`server:gossip-alert:v1.0 (by /u/ditbrugernavn)`. Reddit beder udtrykkeligt om
-en genkendelig afsender.
+Reddit beder udtrykkeligt om en genkendelig afsender — derfor
+`REDDIT_USER_AGENT` med dit eget brugernavn.
 
 Udløs derefter en ny deployment i Vercel, så variablerne slår igennem.
 
