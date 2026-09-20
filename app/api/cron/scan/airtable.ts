@@ -1,8 +1,8 @@
-const BASE_URL = "https://api.airtable.com/v0";
+export const BASE_URL = "https://api.airtable.com/v0";
 
 import { normalizeUrl } from "./urls";
 
-function airtableHeaders() {
+export function airtableHeaders() {
   return {
     Authorization: `Bearer ${process.env.AIRTABLE_TOKEN}`,
     "Content-Type": "application/json",
@@ -17,7 +17,7 @@ function airtableHeaders() {
 let sidsteKald = 0;
 const MIN_MS_MELLEM_KALD = 220;
 
-async function pace(): Promise<void> {
+export async function pace(): Promise<void> {
   const nu = Date.now();
   const venteTid = sidsteKald + MIN_MS_MELLEM_KALD - nu;
   if (venteTid > 0) await new Promise((r) => setTimeout(r, venteTid));
@@ -25,7 +25,7 @@ async function pace(): Promise<void> {
 }
 
 /** Gør Airtables fejlsvar læsbart, i stedet for at give en tom fejlbesked. */
-async function beskrivFejl(res: Response): Promise<string> {
+export async function beskrivFejl(res: Response): Promise<string> {
   let tekst = "";
   try {
     tekst = await res.text();

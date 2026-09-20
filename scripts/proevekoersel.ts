@@ -42,6 +42,7 @@ function indsamlOgFiltrer() {
         title: e.title,
         url: e.url,
         source: e.source,
+        platform: e.platform,
         publishedAt: e.publishedRaw,
         excerpt: e.summary || undefined,
       }));

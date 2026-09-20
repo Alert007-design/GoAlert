@@ -38,6 +38,8 @@ eksterne UI-biblioteker.
   Kræver `CRON_SECRET` ligesom scannet
 - `scripts/proevekoersel.ts` — prøvekørsel mod de rigtige kilder uden at
   skrive i Airtable eller sende mails
+- `docs/reddit-ansoegning.md` — sådan søger du om Reddit-adgang
+- `docs/meta-ansoegning.md` — hvad en Facebook/Instagram-ansøgning kræver
 
 ## Afbrydere
 
@@ -164,6 +166,7 @@ ikke falder ud af vinduet i morgen.
   `PublishedAt`
 - **ScanRuns** (valgfri, men anbefalet): `RunAt` (dato med tid), `Status`
   (tekst: `ok` eller `fejl`), `Note` (tekst)
+- **Sources** (valgfri): kildelisten, se [Kilderne styres fra Airtable](#kilderne-styres-fra-airtable)
 
 `FoundAt` er hvornår scannet fandt omtalen, `PublishedAt` hvornår kilden
 udgav den. De to er ikke det samme.
@@ -171,6 +174,64 @@ udgav den. De to er ikke det samme.
 Mangler `PublishedAt`-kolonnen, afviser Airtable hele rækken. Scannet opdager
 det, slår kolonnen fra resten af kørslen og skriver i loggen, hvad der skal
 rettes — i stedet for at tabe omtalen i stilhed, som det skete før.
+
+## Kilderne styres fra Airtable
+
+Kilderne ligger i Airtable-tabellen `Sources`, så de kan tilføjes og fjernes
+uden kodeændringer. Tabellen er **frivillig**: findes den ikke, bruges
+reservelisten i `app/api/cron/scan/kildeliste.ts`, og der skrives én linje i
+loggen. En manglende hjælpetabel må aldrig kunne stoppe overvågningen.
+
+### Kolonner
+
+| Kolonne | Felttype i Airtable | Hvad den bruges til |
+| --- | --- | --- |
+| `Name` | Single line text | Kildenavnet, som det vises i mailen |
+| `Platform` | Single line text | `rss`, `youtube`, `mastodon`, `bluesky`, `wikipedia` … |
+| `Type` | Single select: `feed`, `search` | `feed` = hent alt og filtrér lokalt. `search` = spørg pr. søgeord |
+| `URL` | Single line text | Adressen eller identifikatoren |
+| `Active` | Checkbox | Kun afkrydsede kilder hentes |
+| `LastStatus` | Single line text | Skrives af kildetjekket |
+| `LastChecked` | Date med tid | Skrives af kildetjekket |
+| `LastItemCount` | Number (heltal) | Skrives af kildetjekket |
+
+Mangler `Platform`, antages `rss`. Er `Type` noget andet end `search`,
+behandles kilden som `feed`. En række uden `Name` eller `URL` springes over
+med en linje i loggen i stedet for at vælte kørslen.
+
+Er tabellen tom, eller har ingen rækker flueben i `Active`, bruges
+reservelisten — det er næsten altid en fejl, ikke et ønske om ingen kilder.
+
+### Kildetjek — også fra Vercel
+
+```
+GET /api/debug/feeds
+GET /api/debug/feeds?q=søgeord&timer=48
+GET /api/debug/feeds?gem=1
+```
+
+Kræver `CRON_SECRET` som `Authorization: Bearer <værdi>`.
+
+`?gem=1` skriver `LastStatus`, `LastChecked` og `LastItemCount` tilbage i
+`Sources`, så status kan ses direkte i Airtable.
+
+Ruten er bygget til at kunne køres **fra Vercel**, ikke kun lokalt. Det er
+pointen: Vercel har andre IP-adresser end en privat forbindelse, og flere
+tjenester behandler datacentre anderledes. En kilde, der svarer hjemmefra,
+kan være blokeret i drift — og det er driften, der tæller.
+
+## Den fælles datamodel
+
+Alle kilder leverer præcis de samme felter videre i systemet:
+
+```
+title, url, source, platform, publishedAt, excerpt
+```
+
+Det er dét, der gør, at en ny kilde kan tilføjes uden at røre mailen,
+dedup'en eller aldersreglen. Og det betyder, at en ny platform ikke kan
+slippe uden om 24-timers-reglen — den går gennem det samme ene sted som alt
+andet. Der er en test, der holder øje med netop dét.
 
 ## Tests
 

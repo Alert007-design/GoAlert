@@ -1,14 +1,23 @@
-// Danske nyhedskilder hentet direkte fra mediernes egne RSS-feeds.
+// Hentning og læsning af feeds.
 //
-// Baggrund: Google News' RSS-søgning leverede udelukkende norske kilder,
-// uanset at vi bad om hl=da&gl=DK&ceid=DK:da, og det nyeste indhold i feedet
-// var flere måneder gammelt. Vi henter derfor fra kilderne selv.
+// Selve LISTEN over kilder ligger ikke længere her. Den styres fra
+// Airtable-tabellen "Sources" (se sources-table.ts), så kilder kan tilføjes
+// og fjernes uden kodeændringer. Reservelisten ligger i kildeliste.ts og
+// bruges kun, hvis tabellen ikke kan læses.
 //
-// Et mediefeed indeholder typisk kun de seneste 20-50 artikler. Med én daglig
+// Baggrund for at hente fra mediernes egne feeds: Google News' RSS-søgning
+// leverede udelukkende norske kilder, uanset at vi bad om hl=da&gl=DK, og det
+// nyeste indhold var flere måneder gammelt.
+//
+// Et mediefeed indeholder typisk kun de seneste 10-50 artikler. Med én daglig
 // kørsel kan travle feeds nå at rulle forbi mellem to scanninger — det er en
 // kendt begrænsning, ikke en fejl.
 
 import { parsePublishedAt } from "./dates";
+import { getSources, type Kilde } from "./sources-table";
+
+export type { Feed } from "./kildeliste";
+export { FALLBACK_FEEDS } from "./kildeliste";
 
 export type FoundItem = {
   title: string;
@@ -17,43 +26,6 @@ export type FoundItem = {
   /** ISO 8601. Kildens eget udgivelsestidspunkt. */
   publishedAt: string;
 };
-
-export type Feed = {
-  /** Vises som kildenavn i mails og i Airtable. */
-  name: string;
-  url: string;
-  /**
-   * false = adressen er ikke bekræftet endnu. Kør /api/debug/feeds for at se
-   * hvilke der svarer, og ret listen derefter.
-   */
-  verified: boolean;
-};
-
-export const FEEDS: Feed[] = [
-  // Bekræftet mod DR's egen oversigt over RSS-feeds.
-  { name: "DR", url: "https://www.dr.dk/nyheder/service/feeds/senestenyt", verified: true },
-  { name: "DR Indland", url: "https://www.dr.dk/nyheder/service/feeds/indland", verified: true },
-  { name: "DR Politik", url: "https://www.dr.dk/nyheder/service/feeds/politik", verified: true },
-  { name: "DR Penge", url: "https://www.dr.dk/nyheder/service/feeds/penge", verified: true },
-  { name: "DR Udland", url: "https://www.dr.dk/nyheder/service/feeds/udland", verified: true },
-  { name: "DR Kultur", url: "https://www.dr.dk/nyheder/service/feeds/kultur", verified: true },
-  { name: "DR Viden", url: "https://www.dr.dk/nyheder/service/feeds/viden", verified: true },
-
-  // Afprøvet med rigtige kald 20/9 2026 — alle svarede med læsbare indlæg.
-  { name: "Politiken", url: "https://politiken.dk/rss/senestenyt.rss", verified: true },
-  { name: "Information", url: "https://www.information.dk/feed", verified: true },
-  { name: "Ekstra Bladet", url: "https://ekstrabladet.dk/rssfeed/all/", verified: true },
-  { name: "Berlingske", url: "https://www.berlingske.dk/content/rss", verified: true },
-  { name: "Altinget", url: "https://www.altinget.dk/rss", verified: true },
-  { name: "B.T.", url: "https://www.bt.dk/bt/seneste/rss", verified: true },
-  { name: "Børsen", url: "https://borsen.dk/rss", verified: true },
-
-  // TV 2 er taget ud. Værtsnavnet services.tv2.dk findes ikke længere i DNS,
-  // og seks andre oplagte adresser (nyheder.tv2.dk/rss, /feed, tv2.dk/rss m.fl.)
-  // svarer alle med TV 2's fejlside. Der gættes ikke en ny adresse ind her —
-  // kilden kan tilføjes igen, når en officiel feed-adresse er bekræftet.
-  // Jyllands-Posten og Kristeligt Dagblad er ude af samme grund.
-];
 
 const FEED_TIMEOUT_MS = 8000;
 
@@ -113,6 +85,8 @@ export type FeedEntry = {
   title: string;
   url: string;
   source: string;
+  /** rss, youtube, mastodon, bluesky, wikipedia … Sat fra kildens Platform. */
+  platform: string;
   /** Kildens rå datotekst. Sendes videre til den centrale aldersregel. */
   publishedRaw: string;
   /** Samme dato omregnet til UTC. Null hvis den ikke kunne læses. */
@@ -131,7 +105,7 @@ export type FeedEntry = {
  * Håndterer både RSS (<item>) og Atom (<entry>). Danske medier bruger
  * overvejende RSS, men et par stykker leverer Atom.
  */
-export function parseFeed(xml: string, sourceName: string): FeedEntry[] {
+export function parseFeed(xml: string, sourceName: string, platform = "rss"): FeedEntry[] {
   const isAtom = /<feed[\s>]/i.test(xml) && /<entry[\s>]/i.test(xml);
   const blocks = isAtom
     ? xml.split(/<entry[\s>]/i).slice(1)
@@ -177,6 +151,7 @@ export function parseFeed(xml: string, sourceName: string): FeedEntry[] {
       title,
       url: decodeEntities(rawLink).trim(),
       source: sourceName,
+      platform,
       publishedRaw,
       published: parsedDate.date,
       summary,
@@ -188,7 +163,10 @@ export function parseFeed(xml: string, sourceName: string): FeedEntry[] {
 }
 
 export type FeedStatus = {
+  /** Airtable-rækkens id, hvis kilden kommer fra tabellen. */
+  id: string | null;
   name: string;
+  platform: string;
   url: string;
   ok: boolean;
   status: number | null;
@@ -200,17 +178,28 @@ export type FeedStatus = {
 export type FeedHarvest = {
   entries: FeedEntry[];
   status: FeedStatus[];
+  /** Kom kildelisten fra Airtable, eller blev reservelisten brugt? */
+  fraTabel: boolean;
+  kildeBegrundelse: string;
 };
 
-async function fetchOneFeed(feed: Feed): Promise<{ entries: FeedEntry[]; status: FeedStatus }> {
+async function fetchOneFeed(kilde: Kilde): Promise<{ entries: FeedEntry[]; status: FeedStatus }> {
+  const grundstatus = {
+    id: kilde.id,
+    name: kilde.name,
+    platform: kilde.platform,
+    url: kilde.url,
+  };
+
   try {
-    const res = await fetch(feed.url, {
+    const res = await fetch(kilde.url, {
       cache: "no-store",
       signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
       headers: {
         // Nogle medier afviser forespørgsler uden en genkendelig klient.
         "User-Agent": "GossipAlert/1.0 (+https://gossipalert.dk)",
-        Accept: "application/rss+xml, application/xml, text/xml, */*",
+        Accept:
+          "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
       },
     });
 
@@ -218,8 +207,7 @@ async function fetchOneFeed(feed: Feed): Promise<{ entries: FeedEntry[]; status:
       return {
         entries: [],
         status: {
-          name: feed.name,
-          url: feed.url,
+          ...grundstatus,
           ok: false,
           status: res.status,
           antal: 0,
@@ -230,7 +218,7 @@ async function fetchOneFeed(feed: Feed): Promise<{ entries: FeedEntry[]; status:
     }
 
     const xml = await res.text();
-    const entries = parseFeed(xml, feed.name);
+    const entries = parseFeed(xml, kilde.name, kilde.platform);
     const tidspunkter = entries
       .map((e) => e.published?.getTime())
       .filter((t): t is number => typeof t === "number");
@@ -241,8 +229,7 @@ async function fetchOneFeed(feed: Feed): Promise<{ entries: FeedEntry[]; status:
     return {
       entries,
       status: {
-        name: feed.name,
-        url: feed.url,
+        ...grundstatus,
         ok: entries.length > 0,
         status: res.status,
         antal: entries.length,
@@ -254,8 +241,7 @@ async function fetchOneFeed(feed: Feed): Promise<{ entries: FeedEntry[]; status:
     return {
       entries: [],
       status: {
-        name: feed.name,
-        url: feed.url,
+        ...grundstatus,
         ok: false,
         status: null,
         antal: 0,
@@ -277,16 +263,24 @@ export async function harvestFeeds(force = false): Promise<FeedHarvest> {
     return harvestCache.data;
   }
 
-  const results = await Promise.all(FEEDS.map((f) => fetchOneFeed(f)));
+  const { kilder, fraTabel, begrundelse } = await getSources(force);
+
+  // Kun kilder af typen "feed" hentes her. Typen "search" spørger pr. søgeord
+  // og håndteres et andet sted, når den slags kilder tages i brug.
+  const feedKilder = kilder.filter((k) => k.type === "feed");
+
+  const results = await Promise.all(feedKilder.map((k) => fetchOneFeed(k)));
 
   const data: FeedHarvest = {
     entries: results.flatMap((r) => r.entries),
     status: results.map((r) => r.status),
+    fraTabel,
+    kildeBegrundelse: begrundelse,
   };
 
   const virkende = data.status.filter((s) => s.ok).length;
   console.log(
-    `[feeds] ${virkende}/${FEEDS.length} kilder svarede — ${data.entries.length} indlæg i alt`
+    `[feeds] ${virkende}/${feedKilder.length} kilder svarede — ${data.entries.length} indlæg i alt`
   );
 
   harvestCache = { data, at: Date.now() };
