@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "../_lib/stripe";
+import { paymentsEnabled } from "../_lib/features";
 
 const PRICE_BY_KEYWORD_COUNT: Record<number, string | undefined> = {
   2: process.env.STRIPE_PRICE_2KW,
@@ -11,6 +12,17 @@ const PRICE_BY_KEYWORD_COUNT: Record<number, string | undefined> = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(req: NextRequest) {
+  // Afbryderen tjekkes FØRST, så Stripe aldrig kontaktes, når betaling er fra.
+  if (!paymentsEnabled()) {
+    return NextResponse.json(
+      {
+        error: "BETALING_IKKE_AKTIV",
+        message: "Betalingsfunktionen er ikke aktiv.",
+      },
+      { status: 503 }
+    );
+  }
+
   let body: { email?: string; keywords?: string[] };
   try {
     body = await req.json();
