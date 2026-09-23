@@ -14,6 +14,7 @@
 // kendt begrænsning, ikke en fejl.
 
 import { parsePublishedAt } from "./dates";
+import { DEFAULT_WINDOW_HOURS } from "./freshness";
 import { getSources, type Kilde } from "./sources-table";
 
 export type { Feed } from "./kildeliste";
@@ -245,6 +246,14 @@ export type FeedStatus = {
   status: number | null;
   antal: number;
   nyeste: string | null;
+  /**
+   * Ældste indlæg i feedet — altså hvor langt tilbage feedet rækker.
+   *
+   * Det er tallet, der afgør, om et feed når at rulle forbi mellem to
+   * kørsler: rækker et travlt feed kun seks timer tilbage, mens vinduet er
+   * 24 timer, er de mellemliggende 18 timers indhold aldrig set af scannet.
+   */
+  ældste: string | null;
   fejl: string | null;
 };
 
@@ -285,6 +294,7 @@ async function fetchOneFeed(kilde: Kilde): Promise<{ entries: FeedEntry[]; statu
           status: res.status,
           antal: 0,
           nyeste: null,
+          ældste: null,
           fejl: `HTTP ${res.status}`,
         },
       };
@@ -300,6 +310,9 @@ async function fetchOneFeed(kilde: Kilde): Promise<{ entries: FeedEntry[]; statu
     const nyeste = tidspunkter.length
       ? new Date(Math.max(...tidspunkter)).toISOString()
       : null;
+    const ældste = tidspunkter.length
+      ? new Date(Math.min(...tidspunkter)).toISOString()
+      : null;
 
     return {
       entries,
@@ -309,6 +322,7 @@ async function fetchOneFeed(kilde: Kilde): Promise<{ entries: FeedEntry[]; statu
         status: res.status,
         antal: entries.length,
         nyeste,
+        ældste,
         fejl: entries.length === 0 ? "Svarede, men ingen læsbare indlæg" : null,
       },
     };
@@ -321,10 +335,58 @@ async function fetchOneFeed(kilde: Kilde): Promise<{ entries: FeedEntry[]; statu
         status: null,
         antal: 0,
         nyeste: null,
+        ældste: null,
         fejl: String(err),
       },
     };
   }
+}
+
+/**
+ * Et feed skal have leveret mindst så mange indlæg, før en kort rækkevidde
+ * tælles som rulning.
+ *
+ * Uden den grænse ville ethvert roligt feed blive udråbt til at rulle forbi:
+ * en kilde med tre indlæg fra i dag rækker kun få timer tilbage, men den har
+ * jo ikke tabt noget — den har bare ikke udgivet mere. Et feed ruller først
+ * forbi, når det er fyldt op, og mediernes feeds har typisk plads til 10-50
+ * artikler.
+ */
+const MIN_INDLÆG_FOR_RULNING = 10;
+
+/**
+ * Hvilke feeds rækker kortere tilbage end vinduet?
+ *
+ * Et mediefeed indeholder typisk kun de seneste 10-50 artikler. Når et fyldt
+ * feeds ældste indlæg er yngre end vinduet, har scannet beviseligt ikke set
+ * alt, hvad kilden har udgivet siden sidste kørsel — resten er rullet forbi.
+ *
+ * To slags kilder springes over, fordi de ville give falsk alarm:
+ * dem uden læsbare datoer (der er intet at måle på) og dem med for få
+ * indlæg (de er rolige, ikke afkortede).
+ *
+ * Resultatet er sorteret med den korteste rækkevidde først, så den mest
+ * udsatte kilde står forrest i loggen.
+ */
+export function feedRækkevidde(
+  status: FeedStatus[],
+  nu: Date,
+  vinduetimer: number
+): { navn: string; timer: number }[] {
+  const udsatte: { navn: string; timer: number }[] = [];
+
+  for (const s of status) {
+    if (!s.ældste) continue;
+    if (s.antal < MIN_INDLÆG_FOR_RULNING) continue;
+
+    const ældst = new Date(s.ældste).getTime();
+    if (Number.isNaN(ældst)) continue;
+
+    const timer = (nu.getTime() - ældst) / 3_600_000;
+    if (timer < vinduetimer) udsatte.push({ navn: s.name, timer });
+  }
+
+  return udsatte.sort((a, b) => a.timer - b.timer);
 }
 
 // Feeds hentes én gang pr. kørsel og genbruges på tværs af kunder og søgeord.
@@ -357,6 +419,22 @@ export async function harvestFeeds(force = false): Promise<FeedHarvest> {
   console.log(
     `[feeds] ${virkende}/${feedKilder.length} kilder svarede — ${data.entries.length} indlæg i alt`
   );
+
+  // Hvor mange kilder nåede at rulle forbi? Uden det tal kan en tavs dag ikke
+  // skelnes fra en dag, hvor indholdet simpelthen ikke var i feedet længere.
+  const udsatte = feedRækkevidde(data.status, new Date(), DEFAULT_WINDOW_HOURS);
+  if (udsatte.length) {
+    const værst = udsatte
+      .slice(0, 8)
+      .map((u) => `${u.navn} ${u.timer.toFixed(1)}t`)
+      .join(" · ");
+    console.log(
+      `[feeds] rækkevidde: ${udsatte.length} af ${virkende} svarende kilder rækker ` +
+        `kortere tilbage end vinduet på ${DEFAULT_WINDOW_HOURS}t (${værst}` +
+        (udsatte.length > 8 ? ` · +${udsatte.length - 8} flere` : "") +
+        ")"
+    );
+  }
 
   harvestCache = { data, at: Date.now() };
   return data;

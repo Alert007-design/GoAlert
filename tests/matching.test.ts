@@ -17,6 +17,37 @@ test("delstrenge rammes IKKE", () => {
   assert.equal(matchesKeyword("skatteudvalget mødes i dag", "skat"), false);
 });
 
+test("ejefald rammes", () => {
+  // Fejlen, der gav tre tavse dage i træk: på dansk skrives ejefald uden
+  // apostrof, så "Messerschmidts kritik" er den hyppigste form i en
+  // overskrift — og den blev afvist.
+  assert.ok(matchesKeyword("Messerschmidts kritik af EU", "Messerschmidt"));
+  assert.ok(matchesKeyword("Messerschmidt's kritik af EU", "Messerschmidt"));
+  assert.ok(matchesKeyword("Messerschmidt’s kritik af EU", "Messerschmidt"));
+
+  // Navne, der ender på s, får ejefald med bar apostrof.
+  assert.ok(matchesKeyword("mads' forslag blev nedstemt", "mads"));
+
+  // Ejefald af et flerordet søgeord sidder på det sidste ord.
+  assert.ok(
+    matchesKeyword("statsminister frederiksens tale i dag", "statsminister frederiksen")
+  );
+
+  // Også med æ, ø og å foran endelsen.
+  assert.ok(matchesKeyword("ærøs færge er forsinket", "ærø"));
+});
+
+test("ejefald åbner ikke for delstrenge igen", () => {
+  // Et s må kun stå der, hvis der IKKE følger et bogstav efter. Ellers ville
+  // ejefaldsreglen genindføre præcis det problem, hele mønsteret er bygget
+  // for at undgå.
+  assert.equal(matchesKeyword("messerschmidtsen bor i aalborg", "messerschmidt"), false);
+  assert.equal(matchesKeyword("messerschmidtske tilstande", "messerschmidt"), false);
+  assert.equal(matchesKeyword("skattefri kørsel og skatteudvalget", "skat"), false);
+  assert.equal(matchesKeyword("målmanden stod godt", "mål"), false);
+  assert.equal(matchesKeyword("uro i kosovo i dag", "sos"), false);
+});
+
 test("æ, ø og å virker", () => {
   assert.ok(matchesKeyword("nyt om søren fra fyn", "søren"));
   assert.ok(matchesKeyword("mål i overtiden", "mål"));

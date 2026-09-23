@@ -47,7 +47,12 @@ export type WindowDecision = {
 };
 
 const MAX_LOOKBACK_HOURS = 48;
-const DEFAULT_WINDOW_HOURS = Number(process.env.SCAN_MAX_AGE_HOURS || 24);
+
+/**
+ * Det normale vindue. Eksporteret, fordi loggen i feeds.ts måler feedenes
+ * rækkevidde op mod netop dette tal — så det kun står ét sted.
+ */
+export const DEFAULT_WINDOW_HOURS = Number(process.env.SCAN_MAX_AGE_HOURS || 24);
 
 /**
  * Afgør hvor langt tilbage denne kørsel må kigge.
