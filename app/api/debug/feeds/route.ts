@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { harvestFeeds } from "../../cron/scan/feeds";
+import { feedRækkevidde, harvestFeeds } from "../../cron/scan/feeds";
 import { matchesKeyword } from "../../cron/scan/matching";
 import { updateSourceStatus } from "../../cron/scan/sources-table";
 import { kræverHemmelighed } from "../../_lib/auth";
@@ -68,11 +68,19 @@ export async function GET(req: NextRequest) {
       indenForVindue: friske.length,
       vindueTimer: timer,
     },
+    // De kilder, der rækker kortere tilbage end vinduet, er dem der når at
+    // rulle forbi mellem to kørsler. Står en kilde her, er en tavs dag ikke
+    // nødvendigvis en rolig dag.
+    ruller_forbi: feedRækkevidde(status, new Date(), timer).map((u) => ({
+      kilde: u.navn,
+      rækkerTilbageTimer: Number(u.timer.toFixed(1)),
+    })),
     virker: virkende.map((s) => ({
       kilde: s.name,
       platform: s.platform,
       antal: s.antal,
       nyeste: s.nyeste,
+      ældste: s.ældste,
     })),
     fejler: døde.map((s) => ({
       kilde: s.name,
