@@ -1,6 +1,10 @@
 <!-- FASTE REGLER START -->
 # Faste regler for arbejdet med Morten
 
+Et projekts egne regler i samme fil går forud for disse faste regler, hvis
+de peger forskellige veje. Siger et projekt fx, at der aldrig må pushes
+direkte til main, gælder det.
+
 ## Om mig
 Jeg har ingen kodeerfaring. Forklar alt på almindeligt dansk uden fagsprog. Når
 jeg selv skal gøre noget (Airtable, Vercel, Meta, Stripe, one.com osv.), så giv
