@@ -1,4 +1,40 @@
 <!-- FASTE REGLER START -->
+# Faste regler for arbejdet med Morten
+
+## Om mig
+Jeg har ingen kodeerfaring. Forklar alt på almindeligt dansk uden fagsprog. Når
+jeg selv skal gøre noget (Airtable, Vercel, Meta, Stripe, one.com osv.), så giv
+mig en klik-for-klik-vejledning. Stil spørgsmål, hvis noget er uklart, frem for
+at gætte.
+
+## Fast rækkefølge ved enhver større funktion: Plan → Tests → Byg → Push
+1. PLAN FØRST. Ret ikke i nogen filer, før jeg har godkendt en plan. Planen
+   skal vise: hvilke filer der ændres, i hvilken rækkefølge, hvad der kan gå
+   galt, og om det rører ved betaling, persondata eller noget, der sender
+   automatisk til andre mennesker.
+2. TESTS FØR KODE. Skriv automatiske tests først, inkl. fejlsituationer. De
+   skal fejle fra start. Byg derefter funktionen, indtil alle tests består.
+3. AFSLUT SIKKERT. Kør typecheck, lint og build. Kun hvis alt består: commit
+   med en kort dansk besked og push til GitHub. Vercel bygger derefter selv.
+   Mind mig om at tjekke den rigtige side, når den er ude.
+Små rettelser (tekst, farver, en enkelt fejl) kræver ikke hele forløbet, men
+sig altid kort, hvad du ændrer, før du gør det.
+
+## Særlig forsigtighed
+Ved betaling (Viva), persondata og alt, der svarer automatisk på Facebook:
+ingen auto-accept. Vis hver ændring, og vent på mit ja.
+
+## Mit miljø (gælder kun lokalt på min pc)
+Node ligger i C:\ft\node, npm bruger C:\ft\npm-cache og C:\ft\npm-global.
+Programmer må kun køre fra C:\ft. PowerShell kører i begrænset sprogtilstand,
+så filer skrives med skriveværktøjet, ikke med scripts. Tests (vitest) kan
+ikke køres her, fordi Node ikke må starte esbuild.exe – kør typecheck, lint og
+build lokalt, og kør tests i en cloud-session. GitHub CLI findes ikke; pull
+requests opretter jeg selv på github.com.
+
+## Når noget går galt
+Stop. Forklar, hvad der er sket, og hvordan vi ruller tilbage, før du gør mere.
+
 ## Planen ligger i filer, så en ny session kan fortsætte
 Ved enhver større funktion oprettes mappen `plan/` i repoet med tre filer:
 - `plan/SPEC.md` – hvad funktionen skal kunne, skrevet på dansk, før der
