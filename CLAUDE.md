@@ -33,8 +33,24 @@ Node ligger i C:\ft\node, npm bruger C:\ft\npm-cache og C:\ft\npm-global.
 Programmer må kun køre fra C:\ft. PowerShell kører i begrænset sprogtilstand,
 så filer skrives med skriveværktøjet, ikke med scripts. Tests (vitest) kan
 ikke køres her, fordi Node ikke må starte esbuild.exe – kør typecheck, lint og
-build lokalt, og kør tests i en cloud-session. GitHub CLI findes ikke; pull
-requests opretter jeg selv på github.com.
+build lokalt, og kør tests i en cloud-session. GitHub CLI findes ikke her,
+så pull requests kan hverken oprettes eller flettes lokalt (se næste afsnit).
+
+## Pull requests og fletning
+Jeg fletter ikke selv på github.com. Gør så meget som muligt selv, så jeg
+ikke skal tage tekniske trin og risikere fejl.
+- I en cloud-session (claude.ai/code): opret selv pull requestet, kør tests,
+  og flet det, når typecheck, lint, build og tests er grønne. Følg bagefter
+  udrulningen på Vercel, og sig til, når ændringen er ude, eller hvad der
+  fejlede.
+- Lokalt på min pc: push grenen, og skriv kort, at den flettes fra en
+  cloud-session. Bed mig ikke om at oprette eller flette pull requests.
+- Spørg mig først og vent på et klart ja, før du fletter noget, der rammer
+  rigtige brugere: udsendelse af mails eller sms, tilmelding, samtykke,
+  privatlivspolitik og persondata, afmelding og sletning, betaling, at gøre
+  en side offentlig eller pege et domæne over, og sletning af data.
+  Almindelige rettelser, jeg har bedt om, fletter du uden at spørge.
+- Fejler tests eller build, flettes der ikke.
 
 ## Når noget går galt
 Stop. Forklar, hvad der er sket, og hvordan vi ruller tilbage, før du gør mere.
